@@ -31,10 +31,9 @@ class LlumiBot(discord.Client):
             print(f"Channel id {self.channel_id} was not found on the server. Skipping Database Update")
 
     async def on_message(self, message):
-        if message.author.id in [325678635388502016,301411562487545857]:
-            if message.content == "!llumi":
-                content = self.db.get_random_message().content
-                await message.channel.send(content)
+        if message.content == "!llumi":
+            content = self.db.get_random_message().content
+            await message.channel.send(content)
         
     async def update_db(self):
         while True:
@@ -52,7 +51,7 @@ class LlumiBot(discord.Client):
         async for message in self.channel.history(limit=limit,after=after):
             if message.created_at > ts_last_scanned_message:
                 ts_last_scanned_message = message.created_at
-            if len (message.reactions) >= self.react_count and self.message_filter.is_valid_message(message.content):
+            if self._get_all_reacts(message) >= self.react_count and self.message_filter.is_valid_message(message.content):
                 print(f"Id: {message.id}, content: {message.content}, created at {message.created_at.isoformat()}" )
                 self.db.add_message(MessageData(id=message.id , content= message.content, datetime= str(message.created_at) ))
         
@@ -60,8 +59,11 @@ class LlumiBot(discord.Client):
 
     def _get_all_reacts(self, message: discord.Message)-> int:
         count = 0
+
         for react in message.reactions:
             count += react.count
+
+        return count
 
     def _get_latest_timestamp(self):
         sync_element = self.db.get_last_scanned_message()
