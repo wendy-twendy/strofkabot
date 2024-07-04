@@ -4,8 +4,8 @@ import re
 class MessageFilter():
     def __init__(self):
         self.message_length = 15
-        self.emoji_pattern = re.compile(r'<:[a-z,A-Z,0-9]*?:[a-z,A-Z,0-9]*?>')
-        self.tag_pattern = re.compile(r'<@![a-z,A-Z,0-9]*?>')
+        self.emoji_pattern = re.compile(r'<:.*?:[a-z,A-Z,0-9]*?>')
+        self.tag_pattern = re.compile(r'<@.*?>')
 
     def is_valid_message(self, message: str)-> bool:
         if len(message) < self.message_length:
