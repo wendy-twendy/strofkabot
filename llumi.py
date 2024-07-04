@@ -33,15 +33,8 @@ class LlumiBot(discord.Client):
     async def on_message(self, message):
         if message.author.id in [325678635388502016,301411562487545857]:
             if message.content == "!llumi":
-                content = await self._get_message_content_by_id(self.db.get_random_message().id)
+                content = self.db.get_random_message().content
                 await message.channel.send(content)
-
-    async def _get_message_content_by_id(self, message_id: int):
-        message = await self._get_message_by_id(message_id)
-        return message.content
-    
-    async def _get_message_by_id(self, message_id: int):
-        return await self.channel.fetch_message(message_id)
         
     async def update_db(self):
         while True:
@@ -61,9 +54,14 @@ class LlumiBot(discord.Client):
                 ts_last_scanned_message = message.created_at
             if len (message.reactions) >= self.react_count and self.message_filter.is_valid_message(message.content):
                 print(f"Id: {message.id}, content: {message.content}, created at {message.created_at.isoformat()}" )
-                self.db.add_message(MessageData(id=message.id , datetime= str(message.created_at) ))
+                self.db.add_message(MessageData(id=message.id , content= message.content, datetime= str(message.created_at) ))
         
         self.db.update_scanning_table(MessageData(datetime=str(ts_last_scanned_message)))
+
+    def _get_all_reacts(self, message: discord.Message)-> int:
+        count = 0
+        for react in message.reactions:
+            count += react.count
 
     def _get_latest_timestamp(self):
         sync_element = self.db.get_last_scanned_message()

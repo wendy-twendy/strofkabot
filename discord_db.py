@@ -11,8 +11,8 @@ import sqlite3
 @dataclass(frozen=True)
 class MessageData:
     id: int = 0
+    content: str = ""
     datetime: str = ""
-
 class DiscordDatabase():
     """ Wrapper around a key-value database for Discord message storage 
         Messages are stored by their id an datetime.
@@ -68,7 +68,7 @@ class DiscordDatabase():
         return self._get_message_from_tuple_message(random_row)
         
 
-    def get_last_message(self)->dict[int, str]:
+    def get_last_message(self)->MessageData:
         """ Return the last message added to the table """
         return self._get_last_table_element(self.channel_name, "id")
 
@@ -112,6 +112,7 @@ class DiscordDatabase():
         create_table_query = f"""
          CREATE TABLE IF NOT EXISTS {channel_name} (
             id INTEGER PRIMARY KEY,
+            content STRING,
             datetime STRING
         );
         """
@@ -126,6 +127,7 @@ class DiscordDatabase():
         create_table_query = f"""
          CREATE TABLE IF NOT EXISTS {self.scanning_table} (
             id INTEGER PRIMARY KEY,
+            content STRING,
             datetime STRING
         );
         """
@@ -135,10 +137,10 @@ class DiscordDatabase():
 
     def _add_element_to_table(self, _table_name:str, message: MessageData):
         insert_query = f"""
-            INSERT OR REPLACE INTO {_table_name} (id, datetime)
-            VALUES (?, ?);
+            INSERT OR REPLACE INTO {_table_name} (id, content, datetime)
+            VALUES (?,?,?);
         """
-        self.cursor.execute(insert_query, (message.id, message.datetime))
+        self.cursor.execute(insert_query, (message.id, message.content, message.datetime))
         self.con.commit()
 
     def _delete_table_content(self, _table_name):
@@ -146,4 +148,4 @@ class DiscordDatabase():
         self.con.commit()
 
     def _get_message_from_tuple_message(self, tuple_message:tuple[int, str]) -> MessageData:
-        return MessageData(id=tuple_message[0], datetime=tuple_message[1])
+        return MessageData(id=tuple_message[0], content=tuple_message[1], datetime=tuple_message[2])
