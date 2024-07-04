@@ -1,8 +1,10 @@
 import os
 from pathlib import Path
 import datetime
+import re
 import discord
 from discord_db import DiscordDatabase, MessageData
+from message_filter import MessageFilter
 
 
 class LlumiBot(discord.Client):
@@ -16,6 +18,7 @@ class LlumiBot(discord.Client):
         self.channel = None
         self.react_count = 4
         print(f"Starting llumibot for channel {self.channel_id} on server {self.guild}.")
+        self.message_filter = MessageFilter()
 
     async def on_ready(self):
         print(f'Logged on as {self.user}!')
@@ -28,11 +31,10 @@ class LlumiBot(discord.Client):
             print(f"Channel id {self.channel_id} was not found on the server. Skipping Database Update")
 
     async def on_message(self, message):
-        if message.author.id in [325678635388502016,301411562487545857]  and message.channel.id == self.channel_id:
+        if message.author.id in [325678635388502016,301411562487545857]:
             if message.content == "!llumi":
                 content = await self._get_message_content_by_id(self.db.get_random_message().id)
                 await message.channel.send(content)
-    
 
     async def _get_message_content_by_id(self, message_id: int):
         message = await self._get_message_by_id(message_id)
@@ -55,10 +57,9 @@ class LlumiBot(discord.Client):
     async def _update_db_block(self, after, limit=1024):
         ts_last_scanned_message = after
         async for message in self.channel.history(limit=limit,after=after):
-            print(message.created_at)
             if message.created_at > ts_last_scanned_message:
                 ts_last_scanned_message = message.created_at
-            if len (message.reactions) >= self.react_count:
+            if len (message.reactions) >= self.react_count and self.message_filter.is_valid_message(message.content):
                 print(f"Id: {message.id}, content: {message.content}, created at {message.created_at.isoformat()}" )
                 self.db.add_message(MessageData(id=message.id , datetime= str(message.created_at) ))
         
