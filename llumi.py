@@ -31,7 +31,7 @@ class LlumiBot(discord.Client):
             print(f"Channel id {self.channel_id} was not found on the server. Skipping Database Update")
 
     async def on_message(self, message):
-        if message.content == "!llumi":
+        if message.content.startswith("!llumi"):
             content = self.db.get_random_message().content
             await message.channel.send(content)
         
