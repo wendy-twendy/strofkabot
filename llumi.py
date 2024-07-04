@@ -17,7 +17,7 @@ class LlumiBot(discord.Client):
         self.guild = None
         self.channel = None
         self.react_count = 4
-        print(f"Starting llumibot for channel {self.channel_id} on server {self.guild}.")
+        print(f"Starting llumibot for channel {self.channel_id} on server {self.guild_id}.")
         self.message_filter = MessageFilter()
 
     async def on_ready(self):
@@ -54,7 +54,7 @@ class LlumiBot(discord.Client):
             else:
                 print(f"Scanning timestamp: {previous_scanned_timestamp}")
 
-    async def _update_db_block(self, after, limit=1024):
+    async def _update_db_block(self, after, limit=100):
         ts_last_scanned_message = after
         async for message in self.channel.history(limit=limit,after=after):
             if message.created_at > ts_last_scanned_message:
