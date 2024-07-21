@@ -34,6 +34,8 @@ class LlumiBot(discord.Client):
         if message.content.startswith(";llumi"):
             content = self.db.get_random_message().content
             await message.channel.send(content)
+        elif message.content.startswith(";unsubscribe"):
+            await message.channel.send("dhe unsubscribe e ki, katolik i karit a orthodox i mutit a shka pidhsome je")
 
     async def update_db(self):
         while True:
