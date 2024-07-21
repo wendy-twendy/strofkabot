@@ -81,6 +81,6 @@ if __name__ == "__main__":
     intents = discord.Intents.default()
     intents.message_content = True
 
-    DATABASE_FILE_LOCATION = "db.sqlite3"
+    DATABASE_FILE_LOCATION = os.path.join(Path().resolve().parent.absolute(),"data","db.sqlite3")
     client = LlumiBot(database_location = Path(DATABASE_FILE_LOCATION), channel_name="llumi_3_reacts", discord_intents=intents)
     client.run(os.getenv("LLUMI_BOT_TOKEN"))
