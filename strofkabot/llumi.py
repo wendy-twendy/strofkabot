@@ -5,8 +5,7 @@ import re
 import discord
 from discord_db import DiscordDatabase, MessageData
 from message_filter import MessageFilter
-
-
+from artan_quotes import ArtanQuotes
 class LlumiBot(discord.Client):
     def __init__(self, database_location: Path, channel_name: str, discord_intents: discord.Intents):
         super().__init__(intents=discord_intents)
@@ -19,6 +18,13 @@ class LlumiBot(discord.Client):
         self.react_count = 4
         print(f"Starting llumibot for channel {self.channel_id} on server {self.guild_id}.")
         self.message_filter = MessageFilter()
+        try:
+            self.artan_quotes = ArtanQuotes(os.path.join(Path().resolve().parent.absolute(),"data","artan_quotes.yaml"))
+        except  ValueError as value_error:
+            print(f"Eror {value_error} during the initiliazation or artan quotes")
+        except Exception as error:
+            print(f"Eror {error} during the initiliazation or artan quotes")
+
 
     async def on_ready(self):
         print(f'Logged on as {self.user}!')
@@ -26,7 +32,7 @@ class LlumiBot(discord.Client):
         self.channel = self._get_text_channel(self.channel_id)
 
         if self.channel is not None:
-             await self.update_db()
+            await self.update_db()
         else:
             print(f"Channel id {self.channel_id} was not found on the server. Skipping Database Update")
 
@@ -36,6 +42,9 @@ class LlumiBot(discord.Client):
             await message.channel.send(content)
         elif message.content.startswith(";unsubscribe"):
             await message.channel.send("dhe unsubscribe e ki, katolik i karit a orthodox i mutit a shka pidhsome je")
+        elif message.content.startswith(";artan"):
+            if self.artan_quotes is not None:
+                await message.channel.send(self.artan_quotes.get_random_quote())
 
     async def update_db(self):
         while True:
@@ -56,7 +65,6 @@ class LlumiBot(discord.Client):
             if self._get_all_reacts(message) >= self.react_count and self.message_filter.is_valid_message(message.content):
                 print(f"Id: {message.id}, content: {message.content}, created at {message.created_at.isoformat()}" )
                 self.db.add_message(MessageData(id=message.id , content= message.content, datetime= str(message.created_at) ))
-        
         self.db.update_scanning_table(MessageData(datetime=str(ts_last_scanned_message)))
 
     def _get_all_reacts(self, message: discord.Message)-> int:
@@ -76,7 +84,6 @@ class LlumiBot(discord.Client):
         for channel in text_channels:
             if channel.id == channel_id:
                 return channel
-            
         return None
 
 if __name__ == "__main__":
