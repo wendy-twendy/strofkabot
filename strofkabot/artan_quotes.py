@@ -10,7 +10,7 @@ class ArtanQuotes():
     def __init__(self, quotes_file_path: pathlib.Path):
         self.quotes = self._extract_quotes(quotes_file_path)
 
-    def _extract_quotes(self, quotes_file_path: pathlib.Path)-> list[str]:
+    def _extract_quotes(self, quotes_file_path: pathlib.Path) -> 'list[str]':
         try:
             quotes = self._get_quotes_from_yaml_file(quotes_file_path)
         except FileNotFoundError as exc:
