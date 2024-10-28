@@ -1,0 +1,9 @@
+aiosqlite
+discord.py
+matplotlib
+numpy
+pandas
+scikit-learn
+seaborn
+PyYAML
+python-dotenv
