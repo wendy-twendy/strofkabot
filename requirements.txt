@@ -7,3 +7,4 @@ scikit-learn
 seaborn
 PyYAML
 python-dotenv
+networkx

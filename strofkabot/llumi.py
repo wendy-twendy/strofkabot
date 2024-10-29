@@ -8,6 +8,7 @@ from pathlib import Path
 import datetime
 import signal
 import sys
+import re
 
 import discord
 from discord.ext import commands, tasks
@@ -44,7 +45,13 @@ from utils import (
     get_non_bot_member_ids,
     prepare_clustering_data,
     perform_kmeans_clustering,
-    generate_cluster_plot
+    generate_cluster_plot,
+    get_reaction_trade_data,
+    fetch_gdp_data,
+    fetch_hdi_data,
+    create_gdp_plot,
+    create_hdi_plot,
+    send_most_liked_stats
 )
 
 # Load environment variables
@@ -232,6 +239,104 @@ class LlumiBot(commands.Cog):
             self.logger.exception("Error while generating or sending user clusters.")
             await ctx.send("An error occurred while generating the user clusters.")
 
+    @commands.command(name='trade')
+    async def reaction_trade_report(self, ctx: commands.Context, member: discord.Member = None):
+        """
+        Generate a reaction trade report for a user.
+        Usage: !trade [optional: @user]
+        """
+        try:
+            target_user = member or ctx.author
+            self.logger.info(f"Generating trade report for user {target_user.id}")
+            trade_data = await get_reaction_trade_data(self.user_stats, target_user.id, self.guild)
+            
+            # Format the report
+            report = f"**Reaction Trade Report for {target_user.display_name}**\n"
+            report += "*Data from the past 12 months*\n```\n"
+            
+            # Top export partners (reactions given to others)
+            report += "Top Export Partners (Reactions Given):\n"
+            if trade_data['exports']:
+                for partner, count in trade_data['exports']:
+                    report += f"  {partner:<20} {count:>6}\n"
+            else:
+                report += "  No reactions given\n"
+            
+            report += "\nTop Import Partners (Reactions Received):\n"
+            if trade_data['imports']:
+                for partner, count in trade_data['imports']:
+                    report += f"  {partner:<20} {count:>6}\n"
+            else:
+                report += "  No reactions received\n"
+            
+            report += "\nTrade Summary:\n"
+            report += f"  Total Reactions Given:    {trade_data['total_given']:>6}\n"
+            report += f"  Total Reactions Received: {trade_data['total_received']:>6}\n"
+            report += f"  Trade Balance:            {trade_data['trade_balance']:>6}\n"
+            
+            # Add trade balance status
+            status = "SURPLUS" if trade_data['trade_balance'] > 0 else "DEFICIT"
+            if trade_data['trade_balance'] == 0:
+                status = "NEUTRAL"
+            report += f"\nTrade Status: {status}"
+            
+            report += "```"
+            
+            await ctx.send(report)
+            self.logger.info(f"Trade report sent for user {target_user.id}")
+            
+        except Exception as e:
+            self.logger.exception(f"Error generating trade report: {e}")
+            await ctx.send("An error occurred while generating the trade report.")
+
+    @commands.command(name='gdp')
+    async def show_server_gdp(self, ctx: commands.Context):
+        """Display the server's GDP (total messages per month)."""
+        try:
+            self.logger.info("Generating GDP plot")
+            gdp_data = await fetch_gdp_data(self.user_stats)
+            
+            if not gdp_data:
+                await ctx.send("No message data available for GDP calculation.")
+                return
+                
+            plot = create_gdp_plot(gdp_data)
+            file = discord.File(fp=plot, filename='server_gdp.png')
+            await ctx.send("**Server GDP (Total Messages per Month)**", file=file)
+            self.logger.info("GDP plot sent successfully")
+        except Exception as e:
+            self.logger.exception("Error generating GDP plot")
+            await ctx.send("An error occurred while generating the GDP plot.")
+
+    @commands.command(name='hdi')
+    async def show_server_hdi(self, ctx: commands.Context):
+        """Display the server's HDI (quality messages per month)."""
+        try:
+            self.logger.info("Generating HDI plot")
+            hdi_data = await fetch_hdi_data(self.user_stats)
+            
+            if not hdi_data:
+                await ctx.send("No message data available for HDI calculation.")
+                return
+                
+            plot = create_hdi_plot(hdi_data)
+            file = discord.File(fp=plot, filename='server_hdi.png')
+            await ctx.send("**Server HDI (Quality Messages per Month)**", file=file)
+            self.logger.info("HDI plot sent successfully")
+        except Exception as e:
+            self.logger.exception("Error generating HDI plot")
+            await ctx.send("An error occurred while generating the HDI plot.")
+
+    @commands.command(name='most-liked')
+    async def show_most_liked(self, ctx: commands.Context):
+        """Show the most influential users based on reaction patterns."""
+        try:
+            current_date = datetime.datetime.now(datetime.timezone.utc)
+            await send_most_liked_stats(ctx, current_date.year, current_date.month, 0, self.user_stats, self.bot)
+        except Exception as e:
+            self.logger.exception("Error in most-liked command")
+            await ctx.send("An error occurred while calculating most-liked users.")
+
     @tasks.loop(seconds=UPDATE_INTERVAL_SECONDS)
     async def update_db_task(self):
         try:
@@ -343,8 +448,21 @@ class LlumiBot(commands.Cog):
             return
 
         self.logger.info(f"Updating usernames for guild: {self.guild.name} (ID: {self.guild.id}). Total members: {self.guild.member_count}")
+        
+        emoji_pattern = re.compile(
+            "["
+            "\U0001F600-\U0001F64F"  # emoticons
+            "\U0001F300-\U0001F5FF"  # symbols & pictographs
+            "\U0001F680-\U0001F6FF"  # transport & map symbols
+            "\U0001F1E0-\U0001F1FF"  # flags (iOS)
+            "\U00002702-\U000027B0"
+            "\U000024C2-\U0001F251"
+            "]+", flags=re.UNICODE)
+
         for member in self.guild.members:
-            await self.user_stats.update_user_mapping(member.id, member.display_name)
+            clean_name = emoji_pattern.sub(r'', member.display_name)
+            await self.user_stats.update_user_mapping(member.id, clean_name)
+        
         self.last_username_update = current_time
         self.logger.info(f"Finished updating usernames at {current_time.isoformat()}.")
 

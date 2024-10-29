@@ -7,6 +7,9 @@ import numpy as np
 from sklearn.cluster import KMeans
 from matplotlib.colors import ListedColormap
 from sklearn.preprocessing import StandardScaler
+import asyncio
+import pandas as pd
+import networkx as nx
 
 def parse_rpm_args(args):
     options = {
@@ -128,6 +131,8 @@ def get_reply_info(message: discord.Message):
 async def fetch_inflation_data(user_stats):
     monthly_data = await user_stats.get_reaction_inflation_raw(monthly=True, limit=12)
     yearly_data = await user_stats.get_reaction_inflation_raw(monthly=False)
+    print("Monthly Inflation Data:", monthly_data)
+    print("Yearly Inflation Data:", yearly_data)
     return monthly_data, yearly_data
 
 def calculate_monthly_inflation(monthly_data):
@@ -301,6 +306,275 @@ def generate_cluster_plot(data, labels, member_names):
     buf.seek(0)
     plt.close()
     return buf
+
+async def get_reaction_trade_data(user_stats, user_id, guild):
+    """Fetch reaction trade data for a specific user from the past year."""
+    await user_stats.ensure_connection()
+    
+    # Calculate date one year ago
+    one_year_ago = datetime.datetime.now() - datetime.timedelta(days=365)
+    year, month = one_year_ago.year, one_year_ago.month
+    
+    # Modified queries to include time constraint
+    export_query = '''
+        SELECT receiver_id, SUM(reaction_count) as total_given
+        FROM user_reactions_monthly
+        WHERE giver_id = ? AND (year > ? OR (year = ? AND month >= ?))
+        GROUP BY receiver_id
+        ORDER BY total_given DESC
+        LIMIT 5
+    '''
+    
+    import_query = '''
+        SELECT giver_id, SUM(reaction_count) as total_received
+        FROM user_reactions_monthly
+        WHERE receiver_id = ? AND (year > ? OR (year = ? AND month >= ?))
+        GROUP BY giver_id
+        ORDER BY total_received DESC
+        LIMIT 5
+    '''
+    
+    async with user_stats.conn.execute(export_query, (user_id, year, year, month)) as cursor:
+        export_data = await cursor.fetchall()
+    
+    async with user_stats.conn.execute(import_query, (user_id, year, year, month)) as cursor:
+        import_data = await cursor.fetchall()
+    
+    # Get total reactions given and received within the time period
+    total_query = '''
+        SELECT
+            (SELECT COALESCE(SUM(reaction_count), 0)
+             FROM user_reactions_monthly
+             WHERE giver_id = ? AND (year > ? OR (year = ? AND month >= ?))) as total_given,
+            (SELECT COALESCE(SUM(reaction_count), 0)
+             FROM user_reactions_monthly
+             WHERE receiver_id = ? AND (year > ? OR (year = ? AND month >= ?))) as total_received
+    '''
+    
+    async with user_stats.conn.execute(total_query, 
+        (user_id, year, year, month, user_id, year, year, month)) as cursor:
+        total_data = await cursor.fetchone()
+    
+    # Process the data
+    exports = []
+    for receiver_id, count in export_data:
+        member = guild.get_member(receiver_id)
+        name = member.display_name if member else f"User {receiver_id}"
+        exports.append((name, count))
+    
+    imports = []
+    for giver_id, count in import_data:
+        member = guild.get_member(giver_id)
+        name = member.display_name if member else f"User {giver_id}"
+        imports.append((name, count))
+    
+    total_given, total_received = total_data
+    trade_balance = total_received - total_given
+    
+    return {
+        'exports': exports,
+        'imports': imports,
+        'total_given': total_given,
+        'total_received': total_received,
+        'trade_balance': trade_balance
+    }
+
+async def fetch_gdp_data(user_stats):
+    """Fetch total messages per month from user_stats_monthly."""
+    await user_stats.ensure_connection()
+    query = '''
+        SELECT year, month, SUM(total_messages) as total_messages
+        FROM user_stats_monthly
+        GROUP BY year, month
+        ORDER BY year DESC, month DESC
+        LIMIT 24
+    '''
+    async with user_stats.conn.execute(query) as cursor:
+        rows = await cursor.fetchall()
+        return [{'year': row[0], 'month': row[1], 'total_messages': row[2]} for row in rows]
+
+async def fetch_hdi_data(user_stats):
+    """Fetch messages added to the messages table per month."""
+    await user_stats.ensure_connection()
+    query = '''
+        SELECT 
+            strftime('%Y', timestamp) as year,
+            strftime('%m', timestamp) as month,
+            COUNT(*) as message_count
+        FROM messages
+        GROUP BY year, month
+        ORDER BY year DESC, month DESC
+        LIMIT 24
+    '''
+    async with user_stats.conn.execute(query) as cursor:
+        rows = await cursor.fetchall()
+        return [{'year': int(row[0]), 'month': int(row[1]), 'message_count': row[2]} for row in rows]
+
+def create_gdp_plot(data):
+    plt.figure(figsize=(12, 6))
+    # Reverse the data to show oldest to newest
+    data = data[::-1]
+    months = [f"{record['year']}-{record['month']:02d}" for record in data]
+    messages = [record['total_messages'] for record in data]
+    
+    # Create line plot with markers
+    plt.plot(months, messages, marker='o', linestyle='-', linewidth=2, markersize=8, color='#ff7f0e')
+    
+    # Fill area under the line with light color
+    plt.fill_between(months, messages, alpha=0.2, color='#ff7f0e')
+    
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(rotation=45, ha='right')
+    plt.xlabel("Month")
+    plt.ylabel("Total Messages")
+    plt.title("Server GDP (Total Messages per Month)")
+    
+    # Add value labels above points
+    for i, v in enumerate(messages):
+        plt.text(i, v + (max(messages) * 0.02), str(v), 
+                ha='center', va='bottom', fontsize=8)
+    
+    plt.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=300)
+    buf.seek(0)
+    plt.close()
+    return buf
+
+def create_hdi_plot(data):
+    plt.figure(figsize=(12, 6))
+    # Reverse the data to show oldest to newest
+    data = data[::-1]
+    months = [f"{record['year']}-{record['month']:02d}" for record in data]
+    messages = [record['message_count'] for record in data]
+    
+    # Create line plot with markers
+    plt.plot(months, messages, marker='o', linestyle='-', linewidth=2, markersize=8, color='#2ecc71')
+    
+    # Fill area under the line with light color
+    plt.fill_between(months, messages, alpha=0.2, color='#2ecc71')
+    
+    plt.grid(True, linestyle='--', alpha=0.7)
+    plt.xticks(rotation=45, ha='right')
+    plt.xlabel("Month")
+    plt.ylabel("Quality Messages")
+    plt.title("Server HDI (Quality Messages per Month)")
+    
+    # Add value labels above points
+    for i, v in enumerate(messages):
+        plt.text(i, v + (max(messages) * 0.02), str(v), 
+                ha='center', va='bottom', fontsize=8)
+    
+    plt.tight_layout()
+    
+    buf = io.BytesIO()
+    plt.savefig(buf, format='png', dpi=300)
+    buf.seek(0)
+    plt.close()
+    return buf
+
+async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, user_stats, bot):
+    """Generate and send most-liked users for a specific month."""
+    adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
+    
+    if datetime.date(adjusted_year, adjusted_month, 1) > datetime.date.today():
+        await ctx.send("Cannot provide statistics for future months.")
+        return
+
+    # Get reaction data for the month
+    query = '''
+        SELECT 
+            um_giver.username AS giver_username,
+            um_receiver.username AS receiver_username,
+            urm.reaction_count,
+            usm_giver.total_messages AS giver_messages,
+            usm_receiver.total_messages AS receiver_messages
+        FROM user_reactions_monthly urm
+        JOIN user_mapping um_giver ON urm.giver_id = um_giver.author_id
+        JOIN user_mapping um_receiver ON urm.receiver_id = um_receiver.author_id
+        JOIN user_stats_monthly usm_giver 
+            ON urm.giver_id = usm_giver.author_id 
+            AND urm.year = usm_giver.year 
+            AND urm.month = usm_giver.month
+        JOIN user_stats_monthly usm_receiver 
+            ON urm.receiver_id = usm_receiver.author_id 
+            AND urm.year = usm_receiver.year 
+            AND urm.month = usm_receiver.month
+        WHERE urm.year = ? AND urm.month = ?
+    '''
+    
+    async with user_stats.conn.execute(query, (adjusted_year, adjusted_month)) as cursor:
+        rows = await cursor.fetchall()
+        
+    if not rows:
+        await ctx.send(f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}.")
+        return
+
+    # Convert to DataFrame for easier filtering
+    df = pd.DataFrame(rows, columns=['giver_username', 'receiver_username', 'reaction_count', 
+                                   'giver_messages', 'receiver_messages'])
+    
+    # Normalize weights
+    df['normalized_weight'] = df['reaction_count'] / 50
+
+    # Filter to keep only the top 20% of connections
+    weight_threshold = df['normalized_weight'].quantile(0.80)
+    df_filtered = df[df['normalized_weight'] >= weight_threshold]
+
+    # Create network graph from filtered connections
+    G = nx.Graph()
+    for _, row in df_filtered.iterrows():
+        if row['giver_username'] != row['receiver_username']:  # Exclude self-loops
+            G.add_edge(row['giver_username'], row['receiver_username'], 
+                      weight=row['normalized_weight'])
+
+    # Remove isolated nodes
+    G.remove_nodes_from(list(nx.isolates(G)))
+
+    if len(G.nodes()) == 0:
+        await ctx.send("Not enough interaction data to calculate rankings.")
+        return
+
+    # Calculate eigenvector centrality
+    try:
+        centrality = nx.eigenvector_centrality(G, weight='weight')
+        top_users = sorted(centrality.items(), key=lambda x: x[1], reverse=True)[:5]
+    except nx.PowerIterationFailedConvergence:
+        await ctx.send("Could not calculate rankings due to insufficient data.")
+        return
+
+    # Create response message
+    response = f"**Most Liked Users for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}:**\n"
+    response += f"{'Rank':<6}{'User':<25}{'Score':<10}\n"
+    response += "-" * 41 + "\n"
+    
+    for rank, (user, score) in enumerate(top_users, 1):
+        response += f"{rank:<6}{user[:24]:<25}{score:.4f}\n"
+    
+    response += "```"
+    
+    # Send message and add navigation reactions
+    message = await ctx.send(response)
+    await message.add_reaction("⬅️")
+    await message.add_reaction("➡️")
+
+    def check(reaction, user):
+        return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
+
+    while True:
+        try:
+            reaction, user = await bot.wait_for('reaction_add', timeout=60.0, check=check)
+            new_offset = month_offset
+            if str(reaction.emoji) == "⬅️":
+                new_offset -= 1
+            elif str(reaction.emoji) == "➡️":
+                new_offset += 1
+            await message.delete()
+            await send_most_liked_stats(ctx, year, month, new_offset, user_stats, bot)
+            break
+        except asyncio.TimeoutError:
+            break
 
 
 # @commands.command(name='repopulate_stats')

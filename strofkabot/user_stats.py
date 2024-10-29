@@ -297,6 +297,65 @@ class UserStats:
         self.logger.debug(f"Fetched raw inflation records: {records[:3]}...")
         return records
 
+
+    async def get_reaction_inflation_raw_new(self, monthly=False, limit=None):
+        """Retrieve raw data for reaction inflation calculations."""
+        await self.ensure_connection()
+        records = []
+        if monthly:
+            self.logger.info("Fetching raw monthly data for reaction inflation.")
+            query = '''
+                SELECT 
+                    usm.year, 
+                    usm.month,
+                    COALESCE((SELECT SUM(reaction_count) 
+                     FROM user_reactions_monthly urm 
+                     WHERE urm.year = usm.year AND urm.month = usm.month), 0) as total_reactions,
+                    COALESCE(SUM(usm.total_messages), 0) as total_messages
+                FROM user_stats_monthly usm
+                GROUP BY usm.year, usm.month
+                ORDER BY usm.year DESC, usm.month DESC
+                LIMIT ?
+            '''
+            async with self.conn.execute(query, (limit or -1,)) as cursor:
+                rows = await cursor.fetchall()
+                records = [
+                    {
+                        'year': row[0],
+                        'month': row[1],
+                        'total_reactions': row[2],
+                        'total_messages': row[3],
+                        'average_rpm': row[2] / row[3] if row[3] else 0  # Avoid division by zero
+                    }
+                    for row in rows
+                ]
+        else:
+            self.logger.info("Fetching raw yearly data for reaction inflation.")
+            query = '''
+                SELECT 
+                    usm.year,
+                    COALESCE((SELECT SUM(reaction_count) 
+                     FROM user_reactions_monthly urm 
+                     WHERE urm.year = usm.year), 0) as total_reactions,
+                    COALESCE(SUM(usm.total_messages), 0) AS total_messages
+                FROM user_stats_monthly usm
+                GROUP BY usm.year
+                ORDER BY usm.year
+            '''
+            async with self.conn.execute(query) as cursor:
+                rows = await cursor.fetchall()
+                records = [
+                    {
+                        'year': row[0],
+                        'total_reactions': row[1],
+                        'total_messages': row[2],
+                        'average_rpm': row[1] / row[2] if row[2] else 0  # Avoid division by zero
+                    }
+                    for row in rows
+                ]
+        self.logger.debug(f"Fetched raw inflation records: {records[:3]}...")
+        return records
+
     async def get_reactions_given_received(self, member_ids: List[int]) -> Dict[int, Dict[str, int]]:
         """Retrieve the number of reactions given and received for each member."""
         await self.ensure_connection()
