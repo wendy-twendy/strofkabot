@@ -544,13 +544,15 @@ async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, u
         await ctx.send("Could not calculate rankings due to insufficient data.")
         return
 
-    # Create response message
-    response = f"**Most Liked Users for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}:**\n"
-    response += f"{'Rank':<6}{'User':<25}{'Score':<10}\n"
-    response += "-" * 41 + "\n"
+    # Format response with code block
+    response = f"**Most Liked Users for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}:**\n```\n"
+    response += f"{'User':<20} {'Score':>8} {'Reactions':>10}\n"
+    response += "-" * 40 + "\n"
     
     for rank, (user, score) in enumerate(top_users, 1):
-        response += f"{rank:<6}{user[:24]:<25}{score:.4f}\n"
+        # Get total reactions received by this user
+        total_reactions = df[df['receiver_username'] == user]['reaction_count'].sum()
+        response += f"{user[:20]:<20} {score:>8.2f} {total_reactions:>10}\n"
     
     response += "```"
     
