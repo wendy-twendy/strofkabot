@@ -174,40 +174,40 @@ class LlumiBot(commands.Cog):
             self.logger.exception(f"Error in send_inflation_stats: {str(e)}")
             await ctx.send("An error occurred while fetching inflation statistics. Please try again later.")
 
-    @commands.command(name='riekt-graph')
-    async def send_reaction_graph(self, ctx: commands.Context):
-        try:
-            current_date = datetime.datetime.now(datetime.timezone.utc)
-            year, month = current_date.year, current_date.month
-            self.logger.info("Generating reaction graph with active users filter.")
+    # @commands.command(name='riekt-graph')
+    # async def send_reaction_graph(self, ctx: commands.Context):
+    #     try:
+    #         current_date = datetime.datetime.now(datetime.timezone.utc)
+    #         year, month = current_date.year, current_date.month
+    #         self.logger.info("Generating reaction graph with active users filter.")
             
-            # Get active users: at least 30 messages in the past month
-            active_users = await self.user_stats.get_active_users(year, month, min_messages=30)
-            if not active_users:
-                await ctx.send("No active users found for the reaction graph.")
-                self.logger.warning("No active users to include in the reaction graph.")
-                return
+    #         # Get active users: at least 30 messages in the past month
+    #         active_users = await self.user_stats.get_active_users(year, month, min_messages=30)
+    #         if not active_users:
+    #             await ctx.send("No active users found for the reaction graph.")
+    #             self.logger.warning("No active users to include in the reaction graph.")
+    #             return
 
-            member_names = await get_member_names(self.guild, active_users)
-            if not member_names:
-                await ctx.send("No valid members found for the reaction graph.")
-                self.logger.warning("No valid member names found for the reaction graph.")
-                return
+    #         member_names = await get_member_names(self.guild, active_users)
+    #         if not member_names:
+    #             await ctx.send("No valid members found for the reaction graph.")
+    #             self.logger.warning("No valid member names found for the reaction graph.")
+    #             return
 
-            reaction_graph = await self.user_stats.get_reaction_graph(active_users)
-            reaction_graph_percentage = calculate_reaction_percentage(reaction_graph)
+    #         reaction_graph = await self.user_stats.get_reaction_graph(active_users)
+    #         reaction_graph_percentage = calculate_reaction_percentage(reaction_graph)
 
-            fig_size = determine_figure_size(len(member_names))
-            reaction_matrix_plot = generate_reaction_matrix_plot(reaction_graph_percentage, member_names, fig_size)
+    #         fig_size = determine_figure_size(len(member_names))
+    #         reaction_matrix_plot = generate_reaction_matrix_plot(reaction_graph_percentage, member_names, fig_size)
 
-            file = discord.File(fp=reaction_matrix_plot, filename='reaction_matrix_percentage.png')
-            await ctx.send("Reaction Matrix (Active Users):", file=file)
-            self.logger.info("Sent reaction matrix with active users.")
-        except Exception as e:
-            self.logger.exception("Error while generating or sending reaction graph.")
-            await ctx.send("An error occurred while generating the reaction graph.")
+    #         file = discord.File(fp=reaction_matrix_plot, filename='reaction_matrix_percentage.png')
+    #         await ctx.send("Reaction Matrix (Active Users):", file=file)
+    #         self.logger.info("Sent reaction matrix with active users.")
+    #     except Exception as e:
+    #         self.logger.exception("Error while generating or sending reaction graph.")
+    #         await ctx.send("An error occurred while generating the reaction graph.")
 
-    @commands.command(name='cluster')
+    # @commands.command(name='cluster')
     async def cluster_users(self, ctx: commands.Context):
         try:
             self.logger.info("Generating user clusters based on reactions given and received.")
@@ -333,6 +333,7 @@ class LlumiBot(commands.Cog):
         try:
             current_date = datetime.datetime.now(datetime.timezone.utc)
             await send_most_liked_stats(ctx, current_date.year, current_date.month, 0, self.user_stats, self.bot)
+            self.logger.info(f"Most-liked stats requested by {ctx.author}")
         except Exception as e:
             self.logger.exception("Error in most-liked command")
             await ctx.send("An error occurred while calculating most-liked users.")
