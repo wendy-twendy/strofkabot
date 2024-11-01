@@ -82,7 +82,7 @@ async def send_leaderboard(ctx, year, month, least, all_users, user_stats, bot):
         await message.add_reaction("➡️")
 
         def check(reaction, user):
-            return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
+            return reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
 
         while True:
             try:
@@ -583,7 +583,7 @@ async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, u
     await message.add_reaction("➡️")
 
     def check(reaction, user):
-        return user == ctx.author and reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
+        return reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
 
     while True:
         try:
