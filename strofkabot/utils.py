@@ -32,15 +32,25 @@ def parse_rpm_args(args):
 async def send_leaderboard(ctx, year, month, least, all_users, user_stats, bot):
     async def send_leaderboard_inner(year: int, month: int, month_offset: int = 0):
         adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
+        current_date = datetime.date.today()
 
-        if datetime.date(adjusted_year, adjusted_month, 1) > datetime.date.today():
-            await ctx.send("Cannot provide statistics for future months.")
-            return
+        # If requested date is in the future, use the most recent available month
+        if datetime.date(adjusted_year, adjusted_month, 1) > current_date:
+            adjusted_year = current_date.year
+            adjusted_month = current_date.month
+            if current_date.day == 1:  # If it's the first day of the month, show previous month
+                adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
 
         stats = await user_stats.get_monthly_stats(adjusted_year, adjusted_month)
         if not stats:
-            await ctx.send("No user statistics available for this month.")
-            return
+            # If no data for current month and it's the first day, show previous month
+            if current_date.day == 1 and adjusted_year == current_date.year and adjusted_month == current_date.month:
+                adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
+                stats = await user_stats.get_monthly_stats(adjusted_year, adjusted_month)
+            
+            if not stats:
+                await ctx.send("No user statistics available for this month.")
+                return
 
         filtered_stats = [stat for stat in stats if stat['total_msgs'] >= 30]
 
@@ -477,10 +487,14 @@ def create_hdi_plot(data):
 async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, user_stats, bot):
     """Generate and send most-liked users for a specific month."""
     adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
+    current_date = datetime.date.today()
     
-    if datetime.date(adjusted_year, adjusted_month, 1) > datetime.date.today():
-        await ctx.send("Cannot provide statistics for future months.")
-        return
+    # If requested date is in the future, use the most recent available month
+    if datetime.date(adjusted_year, adjusted_month, 1) > current_date:
+        adjusted_year = current_date.year
+        adjusted_month = current_date.month
+        if current_date.day == 1:  # If it's the first day of the month, show previous month
+            adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
 
     # Get reaction data for the month
     query = '''
@@ -508,8 +522,15 @@ async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, u
         rows = await cursor.fetchall()
         
     if not rows:
-        await ctx.send(f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}.")
-        return
+        # If no data for current month and it's the first day, show previous month
+        if current_date.day == 1 and adjusted_year == current_date.year and adjusted_month == current_date.month:
+            adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
+            async with user_stats.conn.execute(query, (adjusted_year, adjusted_month)) as cursor:
+                rows = await cursor.fetchall()
+        
+        if not rows:
+            await ctx.send(f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}.")
+            return
 
     # Convert to DataFrame for easier filtering
     df = pd.DataFrame(rows, columns=['giver_username', 'receiver_username', 'reaction_count', 
