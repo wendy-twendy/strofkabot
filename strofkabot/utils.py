@@ -34,23 +34,17 @@ async def send_leaderboard(ctx, year, month, least, all_users, user_stats, bot):
         adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
         current_date = datetime.date.today()
 
-        # If requested date is in the future, use the most recent available month
-        if datetime.date(adjusted_year, adjusted_month, 1) > current_date:
-            adjusted_year = current_date.year
-            adjusted_month = current_date.month
-            if current_date.day == 1:  # If it's the first day of the month, show previous month
-                adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
-
+        # Get stats for the requested month
         stats = await user_stats.get_monthly_stats(adjusted_year, adjusted_month)
+        
+        # If no data and it's current month or future, try previous month
+        if not stats and datetime.date(adjusted_year, adjusted_month, 1) >= datetime.date(current_date.year, current_date.month, 1):
+            adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
+            stats = await user_stats.get_monthly_stats(adjusted_year, adjusted_month)
+        
         if not stats:
-            # If no data for current month and it's the first day, show previous month
-            if current_date.day == 1 and adjusted_year == current_date.year and adjusted_month == current_date.month:
-                adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
-                stats = await user_stats.get_monthly_stats(adjusted_year, adjusted_month)
-            
-            if not stats:
-                await ctx.send("No user statistics available for this month.")
-                return
+            await ctx.send("No user statistics available for this month.")
+            return
 
         filtered_stats = [stat for stat in stats if stat['total_msgs'] >= 30]
 
@@ -489,13 +483,6 @@ async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, u
     adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
     current_date = datetime.date.today()
     
-    # If requested date is in the future, use the most recent available month
-    if datetime.date(adjusted_year, adjusted_month, 1) > current_date:
-        adjusted_year = current_date.year
-        adjusted_month = current_date.month
-        if current_date.day == 1:  # If it's the first day of the month, show previous month
-            adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
-
     # Get reaction data for the month
     query = '''
         SELECT 
@@ -520,17 +507,16 @@ async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, u
     
     async with user_stats.conn.execute(query, (adjusted_year, adjusted_month)) as cursor:
         rows = await cursor.fetchall()
-        
+    
+    # If no data and it's current month or future, try previous month
+    if not rows and datetime.date(adjusted_year, adjusted_month, 1) >= datetime.date(current_date.year, current_date.month, 1):
+        adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
+        async with user_stats.conn.execute(query, (adjusted_year, adjusted_month)) as cursor:
+            rows = await cursor.fetchall()
+    
     if not rows:
-        # If no data for current month and it's the first day, show previous month
-        if current_date.day == 1 and adjusted_year == current_date.year and adjusted_month == current_date.month:
-            adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
-            async with user_stats.conn.execute(query, (adjusted_year, adjusted_month)) as cursor:
-                rows = await cursor.fetchall()
-        
-        if not rows:
-            await ctx.send(f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}.")
-            return
+        await ctx.send(f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}.")
+        return
 
     # Convert to DataFrame for easier filtering
     df = pd.DataFrame(rows, columns=['giver_username', 'receiver_username', 'reaction_count', 
