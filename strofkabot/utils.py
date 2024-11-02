@@ -398,21 +398,45 @@ async def fetch_gdp_data(user_stats):
         return [{'year': row[0], 'month': row[1], 'total_messages': row[2]} for row in rows]
 
 async def fetch_hdi_data(user_stats):
-    """Fetch messages added to the messages table per month."""
+    """Fetch messages and calculate HDI (quality messages / total messages) per month."""
     await user_stats.ensure_connection()
     query = '''
+        WITH quality_messages AS (
+            SELECT 
+                strftime('%Y', timestamp) as year,
+                strftime('%m', timestamp) as month,
+                COUNT(*) as quality_count
+            FROM messages
+            GROUP BY year, month
+        ),
+        total_messages AS (
+            SELECT 
+                year,
+                month,
+                SUM(total_messages) as total_count
+            FROM user_stats_monthly
+            GROUP BY year, month
+        )
         SELECT 
-            strftime('%Y', timestamp) as year,
-            strftime('%m', timestamp) as month,
-            COUNT(*) as message_count
-        FROM messages
-        GROUP BY year, month
-        ORDER BY year DESC, month DESC
+            q.year,
+            q.month,
+            q.quality_count,
+            t.total_count,
+            CAST(q.quality_count AS FLOAT) / NULLIF(t.total_count, 0) as hdi_ratio
+        FROM quality_messages q
+        JOIN total_messages t ON q.year = t.year AND q.month = t.month
+        ORDER BY q.year DESC, q.month DESC
         LIMIT 24
     '''
     async with user_stats.conn.execute(query) as cursor:
         rows = await cursor.fetchall()
-        return [{'year': int(row[0]), 'month': int(row[1]), 'message_count': row[2]} for row in rows]
+        return [{
+            'year': int(row[0]), 
+            'month': int(row[1]), 
+            'quality_count': row[2],
+            'total_count': row[3],
+            'hdi_ratio': row[4]
+        } for row in rows]
 
 def create_gdp_plot(data):
     plt.figure(figsize=(12, 6))
@@ -451,23 +475,23 @@ def create_hdi_plot(data):
     # Reverse the data to show oldest to newest
     data = data[::-1]
     months = [f"{record['year']}-{record['month']:02d}" for record in data]
-    messages = [record['message_count'] for record in data]
+    hdi_values = [record['hdi_ratio'] for record in data]
     
     # Create line plot with markers
-    plt.plot(months, messages, marker='o', linestyle='-', linewidth=2, markersize=8, color='#2ecc71')
+    plt.plot(months, hdi_values, marker='o', linestyle='-', linewidth=2, markersize=8, color='#2ecc71')
     
     # Fill area under the line with light color
-    plt.fill_between(months, messages, alpha=0.2, color='#2ecc71')
+    plt.fill_between(months, hdi_values, alpha=0.2, color='#2ecc71')
     
     plt.grid(True, linestyle='--', alpha=0.7)
     plt.xticks(rotation=45, ha='right')
     plt.xlabel("Month")
-    plt.ylabel("Quality Messages")
-    plt.title("Server HDI (Quality Messages per Month)")
+    plt.ylabel("HDI Ratio (Quality/Total Messages)")
+    plt.title("Server HDI (Quality Messages Ratio per Month)")
     
     # Add value labels above points
-    for i, v in enumerate(messages):
-        plt.text(i, v + (max(messages) * 0.02), str(v), 
+    for i, v in enumerate(hdi_values):
+        plt.text(i, v + (max(hdi_values) * 0.02), f'{v:.3f}', 
                 ha='center', va='bottom', fontsize=8)
     
     plt.tight_layout()
@@ -553,13 +577,11 @@ async def send_most_liked_stats(ctx, year: int, month: int, month_offset: int, u
 
     # Format response with code block
     response = f"**Most Liked Users for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}:**\n```\n"
-    response += f"{'User':<20} {'Score':>8} {'Reactions':>10}\n"
-    response += "-" * 40 + "\n"
+    response += f"{'User':<20} {'Score':>8}\n"
+    response += "-" * 30 + "\n"
     
     for rank, (user, score) in enumerate(top_users, 1):
-        # Get total reactions received by this user
-        total_reactions = df[df['receiver_username'] == user]['reaction_count'].sum()
-        response += f"{user[:20]:<20} {score:>8.2f} {total_reactions:>10}\n"
+        response += f"{user[:20]:<20} {score:>8.2f}\n"
     
     response += "```"
     
