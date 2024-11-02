@@ -359,13 +359,19 @@ class LlumiBot(commands.Cog):
 
         current_time = datetime.datetime.now(datetime.timezone.utc)
         scan_until = current_time - datetime.timedelta(days=1)
-        total_message_count = 0
-        total_reaction_count = 0
+        
+        # Initialize counters as local variables
+        message_counts = []
+        reaction_counts = []
 
         channels = [channel for channel in self.guild.text_channels if channel.permissions_for(self.guild.me).read_messages]
         await asyncio.gather(*(self._process_channel(channel, scan_until, 
-                                                     lambda msg_count, react_count: self._update_totals(msg_count, react_count)) 
+                                                   lambda msg_count, react_count: (message_counts.append(msg_count), 
+                                                                                reaction_counts.append(react_count))) 
                                for channel in channels))
+
+        total_message_count = sum(message_counts)
+        total_reaction_count = sum(reaction_counts)
 
         self.logger.info(f"Database update completed. Total messages added: {total_message_count}")
         self.logger.info(f"Total reactions processed: {total_reaction_count}")
@@ -430,10 +436,6 @@ class LlumiBot(commands.Cog):
                 if user.bot:
                     continue
                 await self.user_stats.update_reaction_stats(user.id, message.author.id, message.created_at)
-
-    def _update_totals(self, msg_count, react_count):
-        self.total_message_count += msg_count
-        self.total_reaction_count += react_count
 
     def _get_all_reacts(self, message: discord.Message) -> int:
         return sum(reaction.count for reaction in message.reactions)
