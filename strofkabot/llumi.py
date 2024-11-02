@@ -12,22 +12,14 @@ import re
 
 import discord
 from discord.ext import commands, tasks
-
-from discord_db import MessageDatabase, Message
-from message_filter import MessageFilter
-from artan_quotes import ArtanQuotes
 from dotenv import load_dotenv
-from user_stats import UserStats
 
-import matplotlib.pyplot as plt
-import seaborn as sns
-import io
-import numpy as np
-from sklearn.cluster import KMeans
-from matplotlib.colors import ListedColormap
-from sklearn.preprocessing import StandardScaler
+from strofkabot.discord_db import MessageDatabase, Message
+from strofkabot.message_filter import MessageFilter
+from strofkabot.artan_quotes import ArtanQuotes
+from strofkabot.user_stats import UserStats
 
-from utils import (
+from strofkabot.utils import (
     parse_rpm_args,
     send_leaderboard,
     send_personal_stats,
@@ -53,6 +45,14 @@ from utils import (
     create_hdi_plot,
     send_most_liked_stats
 )
+
+import matplotlib.pyplot as plt
+import seaborn as sns
+import io
+import numpy as np
+from sklearn.cluster import KMeans
+from matplotlib.colors import ListedColormap
+from sklearn.preprocessing import StandardScaler
 
 # Load environment variables
 load_dotenv()
@@ -104,7 +104,7 @@ class LlumiBot(commands.Cog):
 
         await self.process_commands(message)
 
-    @commands.command(name='llumi')
+    @commands.command(name='llumi', help='Sends a random message from the database that has received significant reactions')
     async def send_random_message(self, ctx: commands.Context):
         random_message = await self.db.get_random_message()
         if random_message:
@@ -114,13 +114,13 @@ class LlumiBot(commands.Cog):
             self.logger.warning("No random message found in the database.")
             await ctx.send("No messages available at the moment.")
 
-    @commands.command(name='unsubscribe')
+    @commands.command(name='unsubscribe', help='Sends a special message about unsubscribing')
     async def send_unsubscribe_response(self, ctx: commands.Context):
         response = "dhe unsubscribe e ki, katolik i karit a orthodox i mutit a shka pidhsome je"
         await ctx.send(response)
         self.logger.info(f"Sent unsubscribe response: {response}")
 
-    @commands.command(name='artan')
+    @commands.command(name='artan', help='Sends a random quote from Artan\'s collection')
     async def send_artan_quote(self, ctx: commands.Context):
         if self.artan_quotes:
             quote = self.artan_quotes.get_random_quote()
@@ -130,7 +130,16 @@ class LlumiBot(commands.Cog):
             self.logger.warning("Artan quotes not initialized, couldn't send a quote.")
             await ctx.send("Quote feature is currently unavailable.")
 
-    @commands.command(name='rpm')
+    @commands.command(
+        name='rpm',
+        help='''Shows reaction statistics for users.
+        Usage: !rpm [options]
+        Options:
+        --leaderboard: Show server-wide RPM leaderboard
+        --least: Show users with lowest RPM (with leaderboard)
+        --all: Show all users instead of top 10 (with leaderboard)
+        No options: Show your personal RPM stats'''
+    )
     async def send_rpm_stats(self, ctx: commands.Context, *args):
         self.logger.info(f"RPM command called by {ctx.author} with args: {args}")
 
@@ -153,7 +162,10 @@ class LlumiBot(commands.Cog):
             self.logger.exception(f"Error in send_rpm_stats: {str(e)}")
             await ctx.send("An error occurred while fetching RPM statistics. Please try again later.")
 
-    @commands.command(name='inflation')
+    @commands.command(
+        name='inflation',
+        help='Displays monthly and yearly reaction inflation statistics with visualizations'
+    )
     async def send_inflation_stats(self, ctx: commands.Context):
         try:
             self.logger.info("Fetching reaction inflation data")
@@ -239,7 +251,16 @@ class LlumiBot(commands.Cog):
             self.logger.exception("Error while generating or sending user clusters.")
             await ctx.send("An error occurred while generating the user clusters.")
 
-    @commands.command(name='trade')
+    @commands.command(
+        name='trade',
+        help='''Shows reaction trading statistics for a user.
+        Usage: !trade [@user]
+        If no user is mentioned, shows your own trade statistics.
+        Displays:
+        - Top reaction trading partners
+        - Total reactions given and received
+        - Trade balance and status'''
+    )
     async def reaction_trade_report(self, ctx: commands.Context, member: discord.Member = None):
         """
         Generate a reaction trade report for a user.
@@ -289,7 +310,10 @@ class LlumiBot(commands.Cog):
             self.logger.exception(f"Error generating trade report: {e}")
             await ctx.send("An error occurred while generating the trade report.")
 
-    @commands.command(name='gdp')
+    @commands.command(
+        name='gdp',
+        help='Displays the server\'s GDP (total messages per month) over time with visualization'
+    )
     async def show_server_gdp(self, ctx: commands.Context):
         """Display the server's GDP (total messages per month)."""
         try:
@@ -308,7 +332,10 @@ class LlumiBot(commands.Cog):
             self.logger.exception("Error generating GDP plot")
             await ctx.send("An error occurred while generating the GDP plot.")
 
-    @commands.command(name='hdi')
+    @commands.command(
+        name='hdi',
+        help='Shows the server\'s Human Development Index (quality messages ratio) over time'
+    )
     async def show_server_hdi(self, ctx: commands.Context):
         """Display the server's HDI (quality messages per month)."""
         try:
@@ -327,7 +354,12 @@ class LlumiBot(commands.Cog):
             self.logger.exception("Error generating HDI plot")
             await ctx.send("An error occurred while generating the HDI plot.")
 
-    @commands.command(name='most-liked')
+    @commands.command(
+        name='most-liked',
+        help='''Shows the most influential users based on reaction patterns.
+        Updates monthly and can be navigated through different months using reactions.
+        Uses network analysis to determine user influence.'''
+    )
     async def show_most_liked(self, ctx: commands.Context):
         """Show the most influential users based on reaction patterns."""
         try:
