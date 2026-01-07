@@ -1,6 +1,7 @@
 """
 Tests for the !llumi command.
 """
+
 import datetime
 
 import discord.ext.test as dpytest
@@ -17,12 +18,16 @@ class TestLlumiCommand:
         """Test that !llumi returns a message from the database."""
         bot, mock_db, _, _ = bot_with_mocked_db
 
+        # Mock the count methods to return integers
+        mock_db.get_message_count.return_value = 10
+        mock_db.get_attachment_count.return_value = 0
+
         mock_db.get_random_message.return_value = Message(
             id=12345,
             content="This is a test message from the database",
             timestamp=datetime.datetime.now(),
             reaction_count=5,
-            author_id=99999
+            author_id=99999,
         )
 
         await dpytest.message("!llumi")
@@ -32,6 +37,10 @@ class TestLlumiCommand:
     async def test_llumi_handles_empty_database(self, bot_with_mocked_db):
         """Test that !llumi handles empty database gracefully."""
         bot, mock_db, _, _ = bot_with_mocked_db
+
+        # Mock the count methods to return 0
+        mock_db.get_message_count.return_value = 0
+        mock_db.get_attachment_count.return_value = 0
 
         mock_db.get_random_message.return_value = None
 
@@ -43,13 +52,24 @@ class TestLlumiCommand:
         """Test that !llumi calls get_random_message on the database."""
         bot, mock_db, _, _ = bot_with_mocked_db
 
+        # Mock the count methods to return integers (all messages, no attachments)
+        mock_db.get_message_count.return_value = 10
+        mock_db.get_attachment_count.return_value = 0
+
         mock_db.get_random_message.return_value = Message(
-            id=1,
-            content="Test",
-            timestamp=datetime.datetime.now(),
-            reaction_count=5,
-            author_id=1
+            id=1, content="Test", timestamp=datetime.datetime.now(), reaction_count=5, author_id=1
         )
 
         await dpytest.message("!llumi")
         mock_db.get_random_message.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_llumi_image_flag_handles_no_images(self, bot_with_mocked_db):
+        """Test that !llumi -i handles case with no images."""
+        bot, mock_db, _, _ = bot_with_mocked_db
+
+        mock_db.get_message_count.return_value = 10
+        mock_db.get_attachment_count.return_value = 0
+
+        await dpytest.message("!llumi -i")
+        assert dpytest.verify().message().content("No images available.")

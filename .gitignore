@@ -165,3 +165,8 @@ cython_debug/
 # Server-specific files
 strofkabot.container
 docs/
+
+# Project database files
+data/*.db
+data/*.sqlite3
+data/attachments/

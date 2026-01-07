@@ -1,13 +1,16 @@
+aiohttp
 aiosqlite
 discord.py
 matplotlib
 numpy
 pandas
+Pillow
 scikit-learn
 seaborn
 PyYAML
 python-dotenv
 networkx
+adjustText
 
 # Testing
 pytest>=7.4.0

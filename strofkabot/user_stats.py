@@ -11,7 +11,7 @@ class UserStats:
 
     def __init__(self, db: Database, logger: logging.Logger | None = None):
         self.db = db
-        self.logger = logger or logging.getLogger('UserStats')
+        self.logger = logger or logging.getLogger("UserStats")
 
     async def update_stats(self, author_id: int, reaction_count: int, timestamp: datetime):
         """Update message and reaction stats for a user."""
@@ -37,11 +37,11 @@ class UserStats:
         self.logger.debug(f"Fetched {len(rows)} rows for monthly stats")
         result = [
             {
-                'author_id': row[0],
-                'username': row[1],
-                'total_msgs': row[2],
-                'total_reacts': row[3],
-                'avg_reacts': row[4]
+                "author_id": row[0],
+                "username": row[1],
+                "total_msgs": row[2],
+                "total_reacts": row[3],
+                "avg_reacts": row[4],
             }
             for row in rows
         ]
@@ -53,11 +53,7 @@ class UserStats:
         self.logger.info(f"Fetching monthly stats for user {author_id} in {year}-{month}")
         row = await self.db.fetch_user_monthly_stats(author_id, year, month)
         if row:
-            result = {
-                'total_msgs': row[0],
-                'total_reacts': row[1],
-                'avg_reacts': row[2]
-            }
+            result = {"total_msgs": row[0], "total_reacts": row[1], "avg_reacts": row[2]}
             self.logger.debug(f"User monthly stats: {result}")
             return result
         self.logger.warning(f"No monthly stats found for user {author_id} in {year}-{month}")
@@ -86,7 +82,9 @@ class UserStats:
             self.logger.error(f"Error resetting statistics: {e}")
             raise
 
-    async def get_reaction_inflation_raw(self, monthly: bool = False, limit: int = None) -> list[dict]:
+    async def get_reaction_inflation_raw(
+        self, monthly: bool = False, limit: int = None
+    ) -> list[dict]:
         """Retrieve raw data for reaction inflation calculations.
 
         Args:
@@ -107,21 +105,21 @@ class UserStats:
         if monthly:
             records = [
                 {
-                    'year': row[0],
-                    'month': row[1],
-                    'total_reactions': row[2],
-                    'total_messages': row[3],
-                    'average_rpm': row[2] / row[3] if row[3] else 0
+                    "year": row[0],
+                    "month": row[1],
+                    "total_reactions": row[2],
+                    "total_messages": row[3],
+                    "average_rpm": row[2] / row[3] if row[3] else 0,
                 }
                 for row in rows
             ]
         else:
             records = [
                 {
-                    'year': row[0],
-                    'total_reactions': row[1],
-                    'total_messages': row[2],
-                    'average_rpm': row[1] / row[2] if row[2] else 0
+                    "year": row[0],
+                    "total_reactions": row[1],
+                    "total_messages": row[2],
+                    "average_rpm": row[1] / row[2] if row[2] else 0,
                 }
                 for row in rows
             ]
@@ -140,7 +138,7 @@ class UserStats:
         """
         self.logger.info(f"Fetching GDP data (limit={limit})")
         rows = await self.db.fetch_gdp_data(limit)
-        return [{'year': row[0], 'month': row[1], 'total_messages': row[2]} for row in rows]
+        return [{"year": row[0], "month": row[1], "total_messages": row[2]} for row in rows]
 
     async def get_hdi_data(self, limit: int = 24) -> list[dict]:
         """Get HDI data (quality messages / total messages) per month.
@@ -153,20 +151,19 @@ class UserStats:
         """
         self.logger.info(f"Fetching HDI data (limit={limit})")
         rows = await self.db.fetch_hdi_data(limit)
-        return [{
-            'year': int(row[0]),
-            'month': int(row[1]),
-            'quality_count': row[2],
-            'total_count': row[3],
-            'hdi_ratio': row[4]
-        } for row in rows]
+        return [
+            {
+                "year": int(row[0]),
+                "month": int(row[1]),
+                "quality_count": row[2],
+                "total_count": row[3],
+                "hdi_ratio": row[4],
+            }
+            for row in rows
+        ]
 
     async def get_reaction_trade_data(
-        self,
-        user_id: int,
-        year: int,
-        month: int,
-        limit: int = 5
+        self, user_id: int, year: int, month: int, limit: int = 5
     ) -> dict:
         """Get reaction trade data for a specific user from a given date.
 
@@ -183,11 +180,11 @@ class UserStats:
         data = await self.db.fetch_trade_data(user_id, year, month, limit)
         # Convert tuples to the expected format
         return {
-            'exports': [(row[0], row[1]) for row in data['exports']],
-            'imports': [(row[0], row[1]) for row in data['imports']],
-            'total_given': data['total_given'],
-            'total_received': data['total_received'],
-            'trade_balance': data['trade_balance']
+            "exports": [(row[0], row[1]) for row in data["exports"]],
+            "imports": [(row[0], row[1]) for row in data["imports"]],
+            "total_given": data["total_given"],
+            "total_received": data["total_received"],
+            "trade_balance": data["trade_balance"],
         }
 
     async def get_reaction_network_for_month(self, year: int, month: int) -> list[dict]:
@@ -202,10 +199,29 @@ class UserStats:
         """
         self.logger.info(f"Fetching reaction network for {year}-{month:02d}")
         rows = await self.db.fetch_reaction_network(year, month)
-        return [{
-            'giver_username': row[0],
-            'receiver_username': row[1],
-            'reaction_count': row[2],
-            'giver_messages': row[3],
-            'receiver_messages': row[4]
-        } for row in rows]
+        return [
+            {
+                "giver_username": row[0],
+                "receiver_username": row[1],
+                "reaction_count": row[2],
+                "giver_messages": row[3],
+                "receiver_messages": row[4],
+            }
+            for row in rows
+        ]
+
+    async def get_reaction_network_rolling(
+        self, start_year: int, start_month: int
+    ) -> list[tuple[str, str, int]]:
+        """Get aggregated reaction network for a rolling window.
+
+        Args:
+            start_year: Start year for the rolling window.
+            start_month: Start month for the rolling window.
+
+        Returns:
+            List of (giver_username, receiver_username, reaction_count) tuples.
+        """
+        self.logger.info(f"Fetching reaction network from {start_year}-{start_month:02d}")
+        rows = await self.db.fetch_reaction_network_rolling(start_year, start_month)
+        return [(row[0], row[1], row[2]) for row in rows]

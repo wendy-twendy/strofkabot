@@ -21,6 +21,18 @@ class Message:
     reply_to_content: str | None = None
 
 
+@dataclass
+class Attachment:
+    id: int
+    message_id: int
+    message_content: str | None
+    author_id: int
+    timestamp: datetime.datetime
+    reaction_count: int
+    original_filename: str
+    local_path: str
+
+
 class Database:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -75,6 +87,17 @@ class Database:
                 month INTEGER,
                 reaction_count INTEGER,
                 PRIMARY KEY (giver_id, receiver_id, year, month)
+            );
+
+            CREATE TABLE IF NOT EXISTS attachments (
+                id INTEGER PRIMARY KEY,
+                message_id INTEGER,
+                message_content TEXT,
+                author_id INTEGER,
+                timestamp TEXT,
+                reaction_count INTEGER,
+                original_filename TEXT,
+                local_path TEXT
             );
         """)
         await self.conn.commit()
@@ -410,3 +433,114 @@ class Database:
         """
         async with self.conn.execute(query, (year, month)) as cursor:
             return await cursor.fetchall()
+
+    async def fetch_reaction_network_rolling(
+        self, start_year: int, start_month: int
+    ) -> list[tuple]:
+        """Fetch aggregated reaction data from start date to previous month.
+
+        Args:
+            start_year: Start year for the rolling window.
+            start_month: Start month for the rolling window.
+
+        Returns:
+            List of (giver_username, receiver_username, total_reaction_count) tuples.
+        """
+        await self.ensure_connection()
+        query = """
+            SELECT
+                um_giver.username AS giver_username,
+                um_receiver.username AS receiver_username,
+                SUM(urm.reaction_count) AS total_reactions
+            FROM user_reactions_monthly urm
+            JOIN user_mapping um_giver ON urm.giver_id = um_giver.author_id
+            JOIN user_mapping um_receiver ON urm.receiver_id = um_receiver.author_id
+            WHERE ((urm.year > ?) OR (urm.year = ? AND urm.month >= ?))
+              AND urm.giver_id != urm.receiver_id
+            GROUP BY urm.giver_id, urm.receiver_id
+        """
+        async with self.conn.execute(query, (start_year, start_year, start_month)) as cursor:
+            return await cursor.fetchall()
+
+    # =========================================================================
+    # Attachment Operations
+    # =========================================================================
+
+    async def add_attachments(self, attachments: list[Attachment]):
+        """Batch insert attachments."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.executemany(
+            """
+            INSERT OR REPLACE INTO attachments
+            (id, message_id, message_content, author_id, timestamp, reaction_count, original_filename, local_path)
+            VALUES (:id, :message_id, :message_content, :author_id, :timestamp, :reaction_count, :original_filename, :local_path)
+        """,
+            [
+                {
+                    "id": att.id,
+                    "message_id": att.message_id,
+                    "message_content": att.message_content,
+                    "author_id": att.author_id,
+                    "timestamp": att.timestamp.isoformat(),
+                    "reaction_count": att.reaction_count,
+                    "original_filename": att.original_filename,
+                    "local_path": att.local_path,
+                }
+                for att in attachments
+            ],
+        ):
+            pass
+        await self.conn.commit()
+
+    async def get_random_attachment(self) -> Attachment | None:
+        """Get a random attachment from the database."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.execute(
+            "SELECT * FROM attachments ORDER BY RANDOM() LIMIT 1"
+        ) as cursor:
+            row = await cursor.fetchone()
+            if row:
+                return Attachment(
+                    id=row[0],
+                    message_id=row[1],
+                    message_content=row[2],
+                    author_id=row[3],
+                    timestamp=datetime.datetime.fromisoformat(row[4]),
+                    reaction_count=row[5],
+                    original_filename=row[6],
+                    local_path=row[7],
+                )
+            return None
+
+    async def get_attachment_count(self) -> int:
+        """Get total number of attachments in the database."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.execute("SELECT COUNT(*) FROM attachments") as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+    async def get_message_count(self) -> int:
+        """Get total number of messages in the database."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.execute("SELECT COUNT(*) FROM messages") as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0
+
+    async def attachment_exists(self, attachment_id: int) -> bool:
+        """Check if an attachment already exists in the database."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+        async with self.conn.execute(
+            "SELECT 1 FROM attachments WHERE id = ?", (attachment_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row is not None

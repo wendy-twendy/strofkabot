@@ -1,6 +1,7 @@
 """
 Tests for background tasks and helper functions in LlumiBot.
 """
+
 import datetime
 import logging
 from pathlib import Path
@@ -12,8 +13,10 @@ from discord.ext import commands
 
 from strofkabot.artan_quotes import ArtanQuotes
 from strofkabot.discord_db import Database
+from strofkabot.image_processor import ImageProcessor
 from strofkabot.llumi import LlumiBot, setup_logging
 from strofkabot.message_filter import MessageFilter
+from strofkabot.message_history_db import MessageHistoryDatabase
 from strofkabot.tasks import BackgroundTaskManager
 from strofkabot.user_stats import UserStats
 
@@ -25,7 +28,7 @@ async def llumi_cog(tmp_path: Path, mock_logger: logging.Logger):
     intents.members = True
     intents.message_content = True
 
-    bot = commands.Bot(command_prefix='!', intents=intents)
+    bot = commands.Bot(command_prefix="!", intents=intents)
     await bot._async_setup_hook()
 
     # Mock database
@@ -49,19 +52,23 @@ async def task_manager(mock_logger: logging.Logger):
     intents.members = True
     intents.message_content = True
 
-    bot = commands.Bot(command_prefix='!', intents=intents)
+    bot = commands.Bot(command_prefix="!", intents=intents)
     await bot._async_setup_hook()
 
     mock_db = AsyncMock(spec=Database)
     mock_user_stats = AsyncMock(spec=UserStats)
     mock_filter = MagicMock(spec=MessageFilter)
+    mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
+    mock_image_processor = MagicMock(spec=ImageProcessor)
 
     manager = BackgroundTaskManager(
         bot=bot,
         db=mock_db,
         user_stats=mock_user_stats,
         message_filter=mock_filter,
-        logger=mock_logger
+        logger=mock_logger,
+        message_history_db=mock_history_db,
+        image_processor=mock_image_processor,
     )
 
     yield manager, mock_db, mock_user_stats
@@ -72,44 +79,44 @@ class TestSetupLogging:
 
     def test_debug_level(self):
         """Test setting DEBUG log level."""
-        logger = setup_logging('DEBUG')
+        logger = setup_logging("DEBUG")
         assert logger.level == logging.DEBUG
-        assert logger.name == 'LlumiBot'
+        assert logger.name == "LlumiBot"
 
     def test_info_level(self):
         """Test setting INFO log level."""
-        logger = setup_logging('INFO')
+        logger = setup_logging("INFO")
         assert logger.level == logging.INFO
 
     def test_warning_level(self):
         """Test setting WARNING log level."""
-        logger = setup_logging('WARNING')
+        logger = setup_logging("WARNING")
         assert logger.level == logging.WARNING
 
     def test_error_level(self):
         """Test setting ERROR log level."""
-        logger = setup_logging('ERROR')
+        logger = setup_logging("ERROR")
         assert logger.level == logging.ERROR
 
     def test_critical_level(self):
         """Test setting CRITICAL log level."""
-        logger = setup_logging('CRITICAL')
+        logger = setup_logging("CRITICAL")
         assert logger.level == logging.CRITICAL
 
     def test_returns_logger(self):
         """Test that function returns a logger instance."""
-        logger = setup_logging('INFO')
+        logger = setup_logging("INFO")
         assert isinstance(logger, logging.Logger)
         assert logger.handlers  # Has at least one handler
 
     def test_lowercase_level(self):
         """Test handling lowercase level strings."""
-        logger = setup_logging('debug')
+        logger = setup_logging("debug")
         assert logger.level == logging.DEBUG
 
     def test_invalid_level_defaults_to_info(self):
         """Test invalid level defaults to INFO."""
-        logger = setup_logging('INVALID')
+        logger = setup_logging("INVALID")
         # getattr with default returns logging.INFO when attribute not found
         assert logger.level == logging.INFO
 
@@ -428,7 +435,7 @@ class TestProcessChannel:
             db=mock_db,
             user_stats=mock_user_stats,
             message_filter=mock_filter,
-            logger=mock_logger
+            logger=mock_logger,
         )
 
         # Create a message from the bot
@@ -459,7 +466,7 @@ class TestProcessChannel:
 
     @pytest.mark.asyncio
     async def test_process_channel_skips_empty_content(self, mock_logger):
-        """Test that messages with empty content are skipped."""
+        """Test that messages with empty content are skipped for stats (but still recorded to history)."""
         mock_bot = MagicMock()
         mock_bot.user = MagicMock()
         mock_bot.user.id = 999
@@ -467,21 +474,29 @@ class TestProcessChannel:
         mock_db = AsyncMock(spec=Database)
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
+        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
+        mock_image_processor = MagicMock(spec=ImageProcessor)
 
         manager = BackgroundTaskManager(
             bot=mock_bot,
             db=mock_db,
             user_stats=mock_user_stats,
             message_filter=mock_filter,
-            logger=mock_logger
+            logger=mock_logger,
+            message_history_db=mock_history_db,
+            image_processor=mock_image_processor,
         )
 
         empty_message = MagicMock()
         empty_message.author = MagicMock()
         empty_message.author.id = 12345
+        empty_message.author.display_name = "TestUser"
         empty_message.content = "   "  # Whitespace only
         empty_message.created_at = datetime.datetime.now(datetime.UTC)
         empty_message.reactions = []
+        empty_message.attachments = []
+        empty_message.reference = None
+        empty_message.id = 11111
 
         mock_channel = MagicMock(spec=discord.TextChannel)
         mock_channel.name = "test-channel"
@@ -500,6 +515,8 @@ class TestProcessChannel:
 
         # Should not add stats for empty messages
         mock_user_stats.batch_update_stats.assert_not_called()
+        # But should still record to message history
+        mock_history_db.add_messages.assert_called()
 
     @pytest.mark.asyncio
     async def test_process_channel_filters_low_reactions(self, mock_logger):
@@ -512,21 +529,29 @@ class TestProcessChannel:
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
         mock_filter.is_valid_message.return_value = True
+        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
+        mock_image_processor = MagicMock(spec=ImageProcessor)
 
         manager = BackgroundTaskManager(
             bot=mock_bot,
             db=mock_db,
             user_stats=mock_user_stats,
             message_filter=mock_filter,
-            logger=mock_logger
+            logger=mock_logger,
+            message_history_db=mock_history_db,
+            image_processor=mock_image_processor,
         )
 
         # Message with reactions below threshold (default is 4)
         low_react_message = MagicMock()
         low_react_message.author = MagicMock()
         low_react_message.author.id = 12345
+        low_react_message.author.display_name = "TestUser"
         low_react_message.content = "This is a valid message content"
         low_react_message.created_at = datetime.datetime.now(datetime.UTC)
+        low_react_message.attachments = []
+        low_react_message.reference = None
+        low_react_message.id = 11111
 
         reaction = MagicMock()
         reaction.count = 2  # Below threshold of 4
@@ -563,23 +588,33 @@ class TestProcessChannel:
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
         mock_filter.is_valid_message.return_value = False  # Filter rejects
+        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
+        mock_image_processor = MagicMock(spec=ImageProcessor)
+        mock_image_processor.is_image.return_value = False
 
         manager = BackgroundTaskManager(
             bot=mock_bot,
             db=mock_db,
             user_stats=mock_user_stats,
             message_filter=mock_filter,
-            logger=mock_logger
+            logger=mock_logger,
+            message_history_db=mock_history_db,
+            image_processor=mock_image_processor,
         )
 
         high_react_message = MagicMock()
         high_react_message.author = MagicMock()
         high_react_message.author.id = 12345
+        high_react_message.author.display_name = "TestUser"
         high_react_message.content = "http://link.com"  # Would be filtered
         high_react_message.created_at = datetime.datetime.now(datetime.UTC)
+        high_react_message.attachments = []
+        high_react_message.reference = None
+        high_react_message.id = 11111
 
         reaction = MagicMock()
         reaction.count = 10  # Above threshold
+        reaction.emoji = "👍"
         high_react_message.reactions = [reaction]
 
         mock_channel = MagicMock(spec=discord.TextChannel)
@@ -638,13 +673,17 @@ class TestProcessChannel:
         mock_db = AsyncMock(spec=Database)
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
+        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
+        mock_image_processor = MagicMock(spec=ImageProcessor)
 
         manager = BackgroundTaskManager(
             bot=mock_bot,
             db=mock_db,
             user_stats=mock_user_stats,
             message_filter=mock_filter,
-            logger=mock_logger
+            logger=mock_logger,
+            message_history_db=mock_history_db,
+            image_processor=mock_image_processor,
         )
 
         # Create 150 messages to trigger batching
@@ -653,9 +692,13 @@ class TestProcessChannel:
             msg = MagicMock()
             msg.author = MagicMock()
             msg.author.id = 12345
+            msg.author.display_name = "TestUser"
             msg.content = f"Message {i} with enough content"
             msg.created_at = datetime.datetime.now(datetime.UTC)
             msg.reactions = []
+            msg.attachments = []
+            msg.reference = None
+            msg.id = 10000 + i
             messages.append(msg)
 
         mock_channel = MagicMock(spec=discord.TextChannel)

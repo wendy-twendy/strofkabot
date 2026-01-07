@@ -10,38 +10,34 @@ from strofkabot.utils.date_utils import adjust_month
 
 def parse_rpm_args(args: tuple) -> dict[str, bool]:
     """Parse command-line arguments for RPM commands."""
-    options = {'option': None, 'flags': []}
+    options = {"option": None, "flags": []}
     for arg in args:
-        if arg.startswith('--'):
-            options['flags'].append(arg)
-        elif not options['option']:
-            options['option'] = arg
+        if arg.startswith("--"):
+            options["flags"].append(arg)
+        elif not options["option"]:
+            options["option"] = arg
 
     return {
-        'least': '--least' in options['flags'],
-        'all_users': '--all' in options['flags'],
-        'leaderboard': '--leaderboard' in options['flags']
+        "least": "--least" in options["flags"],
+        "all_users": "--all" in options["flags"],
+        "leaderboard": "--leaderboard" in options["flags"],
     }
 
 
 async def send_leaderboard(
-    ctx,
-    year: int,
-    month: int,
-    least: bool,
-    all_users: bool,
-    user_stats,
-    bot
+    ctx, year: int, month: int, least: bool, all_users: bool, user_stats, bot
 ) -> None:
     """Send an interactive RPM leaderboard with navigation."""
+
     async def send_leaderboard_inner(year: int, month: int, month_offset: int = 0):
         adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
         current_date = datetime.date.today()
 
         stats = await user_stats.get_monthly_stats(adjusted_year, adjusted_month)
 
-        if not stats and datetime.date(adjusted_year, adjusted_month, 1) >= \
-           datetime.date(current_date.year, current_date.month, 1):
+        if not stats and datetime.date(adjusted_year, adjusted_month, 1) >= datetime.date(
+            current_date.year, current_date.month, 1
+        ):
             adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
             stats = await user_stats.get_monthly_stats(adjusted_year, adjusted_month)
 
@@ -49,17 +45,17 @@ async def send_leaderboard(
             await ctx.send("No user statistics available for this month.")
             return
 
-        filtered_stats = [stat for stat in stats if stat['total_msgs'] >= 30]
+        filtered_stats = [stat for stat in stats if stat["total_msgs"] >= 30]
 
         if not filtered_stats:
             await ctx.send("No users with at least 30 messages found for this month.")
             return
 
-        total_reactions = sum(stat['total_reacts'] for stat in stats)
-        total_messages = sum(stat['total_msgs'] for stat in stats)
+        total_reactions = sum(stat["total_reacts"] for stat in stats)
+        total_messages = sum(stat["total_msgs"] for stat in stats)
         server_avg_rpm = total_reactions / total_messages if total_messages > 0 else 0
 
-        filtered_stats.sort(key=lambda x: x['avg_reacts'], reverse=not least)
+        filtered_stats.sort(key=lambda x: x["avg_reacts"], reverse=not least)
 
         leaderboard_type = "Least" if least else "RPM"
         response = f"**{leaderboard_type} Leaderboard for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}:**\n"
@@ -71,7 +67,7 @@ async def send_leaderboard(
         users_to_show = filtered_stats if all_users else filtered_stats[:10]
 
         for stat in users_to_show:
-            display_name = stat['username'] or f"User {stat['author_id']}"
+            display_name = stat["username"] or f"User {stat['author_id']}"
             response += f"{display_name[:20]:<20} {stat['avg_reacts']:5.2f} {stat['total_msgs']:5d} {stat['total_reacts']:7d}\n"
         response += "```"
 
@@ -84,7 +80,7 @@ async def send_leaderboard(
 
         while True:
             try:
-                reaction, user = await bot.wait_for('reaction_add', timeout=60.0, check=check)
+                reaction, user = await bot.wait_for("reaction_add", timeout=60.0, check=check)
                 new_offset = month_offset
                 if str(reaction.emoji) == "⬅️":
                     new_offset -= 1
@@ -134,8 +130,12 @@ def get_reply_info(message: discord.Message) -> tuple[int | None, str | None, st
             reply_to_author = "Deleted User"
             reply_to_content = "Message was deleted"
         else:
-            reply_to_author = replied_msg.author.display_name if replied_msg.author else "Unknown User"
-            reply_to_content = replied_msg.content if hasattr(replied_msg, 'content') else "Content unavailable"
+            reply_to_author = (
+                replied_msg.author.display_name if replied_msg.author else "Unknown User"
+            )
+            reply_to_content = (
+                replied_msg.content if hasattr(replied_msg, "content") else "Content unavailable"
+            )
 
     return reply_to_id, reply_to_author, reply_to_content
 
@@ -146,7 +146,10 @@ async def get_member_names(guild: discord.Guild, member_ids: list[int]) -> list[
     for user_id in member_ids:
         member = guild.get_member(user_id)
         if member:
-            name = ''.join(char for char in member.display_name if ord(char) < 128) or f"User {user_id}"
+            name = (
+                "".join(char for char in member.display_name if ord(char) < 128)
+                or f"User {user_id}"
+            )
             member_names.append(name)
         else:
             member_names.append(f"User {user_id}")
@@ -160,7 +163,8 @@ async def get_non_bot_member_ids(guild: discord.Guild) -> list[int]:
 
 def calculate_average_preference_share(
     rows: list[dict],
-    min_unique_reactors: int = 5
+    min_unique_reactors: int = 5,
+    min_giver_reactions: int = 10,
 ) -> list[tuple[str, float]]:
     """Calculate Average Preference Share scores for most-liked ranking.
 
@@ -171,6 +175,7 @@ def calculate_average_preference_share(
     Args:
         rows: List of dicts with giver_username, receiver_username, reaction_count
         min_unique_reactors: Minimum unique reactors required to qualify for ranking
+        min_giver_reactions: Minimum total reactions a giver must have to be included
 
     Returns:
         List of (username, score) tuples sorted by score descending
@@ -178,19 +183,24 @@ def calculate_average_preference_share(
     # Step 1: Calculate total reactions given by each giver
     giver_totals: dict[str, int] = defaultdict(int)
     for row in rows:
-        giver_totals[row['giver_username']] += row['reaction_count']
+        giver_totals[row["giver_username"]] += row["reaction_count"]
 
-    # Step 2: Calculate preference shares and aggregate by receiver
+    # Filter to only include givers with minimum reactions
+    qualified_givers = {
+        giver for giver, total in giver_totals.items() if total >= min_giver_reactions
+    }
+
+    # Step 2: Calculate preference shares and aggregate by receiver (only from qualified givers)
     receiver_shares: dict[str, list[float]] = defaultdict(list)
     for row in rows:
-        giver = row['giver_username']
-        receiver = row['receiver_username']
-        if giver != receiver:  # Exclude self-reactions
-            share = row['reaction_count'] / giver_totals[giver]
+        giver = row["giver_username"]
+        receiver = row["receiver_username"]
+        if giver != receiver and giver in qualified_givers:
+            share = row["reaction_count"] / giver_totals[giver]
             receiver_shares[receiver].append(share)
 
-    # Step 3: Calculate APS for each receiver
-    num_givers = len(giver_totals)
+    # Step 3: Calculate APS for each receiver (using only qualified givers count)
+    num_givers = len(qualified_givers)
     scores: dict[str, float] = {}
     for receiver, shares in receiver_shares.items():
         unique_reactors = len(shares)
@@ -201,13 +211,7 @@ def calculate_average_preference_share(
 
 
 async def send_most_liked_stats(
-    ctx,
-    year: int,
-    month: int,
-    month_offset: int,
-    user_stats,
-    bot,
-    show_all: bool = False
+    ctx, year: int, month: int, month_offset: int, user_stats, bot, show_all: bool = False
 ) -> None:
     """Generate and send most-liked users for a specific month."""
     adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
@@ -217,13 +221,16 @@ async def send_most_liked_stats(
     rows = await user_stats.get_reaction_network_for_month(adjusted_year, adjusted_month)
 
     # Fall back to previous month if no data and we're at current month
-    if not rows and datetime.date(adjusted_year, adjusted_month, 1) >= \
-       datetime.date(current_date.year, current_date.month, 1):
+    if not rows and datetime.date(adjusted_year, adjusted_month, 1) >= datetime.date(
+        current_date.year, current_date.month, 1
+    ):
         adjusted_year, adjusted_month = adjust_month(adjusted_year, adjusted_month, -1)
         rows = await user_stats.get_reaction_network_for_month(adjusted_year, adjusted_month)
 
     if not rows:
-        await ctx.send(f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}.")
+        await ctx.send(
+            f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}."
+        )
         return
 
     # Calculate Average Preference Share scores
@@ -259,7 +266,7 @@ async def send_most_liked_stats(
 
     while True:
         try:
-            reaction, user = await bot.wait_for('reaction_add', timeout=60.0, check=check)
+            reaction, user = await bot.wait_for("reaction_add", timeout=60.0, check=check)
             new_offset = month_offset
             if str(reaction.emoji) == "⬅️":
                 new_offset -= 1

@@ -4,7 +4,7 @@ Tests for the Database class.
 
 import datetime
 
-from strofkabot.discord_db import Database, Message
+from strofkabot.discord_db import Attachment, Database, Message
 
 
 class TestDatabaseInitialization:
@@ -554,3 +554,217 @@ class TestComplexQueries:
         """Test fetching reaction network for empty month returns empty list."""
         result = await message_database.fetch_reaction_network(2024, 12)
         assert result == []
+
+
+class TestAttachmentOperations:
+    """Tests for attachment CRUD operations."""
+
+    async def test_add_single_attachment(self, message_database: Database):
+        """Test adding a single attachment."""
+        attachment = Attachment(
+            id=100,
+            message_id=1000,
+            message_content="Test message with image",
+            author_id=12345,
+            timestamp=datetime.datetime(2024, 5, 1, 12, 0, 0),
+            reaction_count=5,
+            original_filename="test.jpg",
+            local_path="1000/100.jpg",
+        )
+        await message_database.add_attachments([attachment])
+
+        async with message_database.conn.execute(
+            "SELECT * FROM attachments WHERE id = ?", (100,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None
+        assert row[0] == 100  # id
+        assert row[1] == 1000  # message_id
+        assert row[2] == "Test message with image"  # message_content
+        assert row[3] == 12345  # author_id
+        assert row[5] == 5  # reaction_count
+        assert row[6] == "test.jpg"  # original_filename
+        assert row[7] == "1000/100.jpg"  # local_path
+
+    async def test_add_multiple_attachments(self, message_database: Database):
+        """Test batch adding attachments."""
+        attachments = [
+            Attachment(
+                id=i,
+                message_id=1000 + i,
+                message_content=f"Message {i}",
+                author_id=12345,
+                timestamp=datetime.datetime.now(),
+                reaction_count=i,
+                original_filename=f"file{i}.jpg",
+                local_path=f"{1000+i}/{i}.jpg",
+            )
+            for i in range(1, 6)
+        ]
+        await message_database.add_attachments(attachments)
+
+        async with message_database.conn.execute("SELECT COUNT(*) FROM attachments") as cursor:
+            count = (await cursor.fetchone())[0]
+
+        assert count == 5
+
+    async def test_add_attachment_with_null_content(self, message_database: Database):
+        """Test adding an attachment with no message content."""
+        attachment = Attachment(
+            id=200,
+            message_id=2000,
+            message_content=None,
+            author_id=12345,
+            timestamp=datetime.datetime.now(),
+            reaction_count=5,
+            original_filename="image.png",
+            local_path="2000/200.png",
+        )
+        await message_database.add_attachments([attachment])
+
+        async with message_database.conn.execute(
+            "SELECT message_content FROM attachments WHERE id = ?", (200,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] is None
+
+    async def test_get_random_attachment_returns_attachment_object(
+        self, message_database: Database
+    ):
+        """Test that get_random_attachment returns an Attachment dataclass."""
+        attachment = Attachment(
+            id=100,
+            message_id=1000,
+            message_content="Test",
+            author_id=12345,
+            timestamp=datetime.datetime(2024, 5, 1, 12, 0, 0),
+            reaction_count=5,
+            original_filename="test.jpg",
+            local_path="1000/100.jpg",
+        )
+        await message_database.add_attachments([attachment])
+
+        result = await message_database.get_random_attachment()
+
+        assert result is not None
+        assert isinstance(result, Attachment)
+        assert result.id == 100
+
+    async def test_get_random_attachment_empty_database(self, message_database: Database):
+        """Test get_random_attachment on empty database returns None."""
+        result = await message_database.get_random_attachment()
+        assert result is None
+
+    async def test_get_random_attachment_timestamp_is_datetime(self, message_database: Database):
+        """Verify that timestamp is properly converted to datetime object."""
+        attachment = Attachment(
+            id=100,
+            message_id=1000,
+            message_content="Test",
+            author_id=12345,
+            timestamp=datetime.datetime(2024, 5, 1, 12, 0, 0),
+            reaction_count=5,
+            original_filename="test.jpg",
+            local_path="1000/100.jpg",
+        )
+        await message_database.add_attachments([attachment])
+
+        result = await message_database.get_random_attachment()
+        assert isinstance(result.timestamp, datetime.datetime)
+
+    async def test_get_attachment_count(self, message_database: Database):
+        """Test getting attachment count."""
+        assert await message_database.get_attachment_count() == 0
+
+        attachments = [
+            Attachment(
+                id=i,
+                message_id=1000 + i,
+                message_content=f"Message {i}",
+                author_id=12345,
+                timestamp=datetime.datetime.now(),
+                reaction_count=i,
+                original_filename=f"file{i}.jpg",
+                local_path=f"{1000+i}/{i}.jpg",
+            )
+            for i in range(1, 4)
+        ]
+        await message_database.add_attachments(attachments)
+
+        assert await message_database.get_attachment_count() == 3
+
+    async def test_get_message_count(self, message_database: Database):
+        """Test getting message count."""
+        assert await message_database.get_message_count() == 0
+
+        messages = [
+            Message(
+                id=i,
+                content=f"Message {i}",
+                timestamp=datetime.datetime.now(),
+                reaction_count=i,
+                author_id=12345,
+            )
+            for i in range(1, 6)
+        ]
+        await message_database.add_messages(messages)
+
+        assert await message_database.get_message_count() == 5
+
+    async def test_attachment_exists_true(self, message_database: Database):
+        """Test that attachment_exists returns True for existing attachment."""
+        attachment = Attachment(
+            id=100,
+            message_id=1000,
+            message_content="Test",
+            author_id=12345,
+            timestamp=datetime.datetime.now(),
+            reaction_count=5,
+            original_filename="test.jpg",
+            local_path="1000/100.jpg",
+        )
+        await message_database.add_attachments([attachment])
+
+        assert await message_database.attachment_exists(100) is True
+
+    async def test_attachment_exists_false(self, message_database: Database):
+        """Test that attachment_exists returns False for non-existing attachment."""
+        assert await message_database.attachment_exists(99999) is False
+
+    async def test_upsert_attachment_updates_existing(self, message_database: Database):
+        """Test that adding an attachment with existing ID updates it (INSERT OR REPLACE)."""
+        attachment1 = Attachment(
+            id=100,
+            message_id=1000,
+            message_content="Original",
+            author_id=12345,
+            timestamp=datetime.datetime.now(),
+            reaction_count=5,
+            original_filename="original.jpg",
+            local_path="1000/100.jpg",
+        )
+        await message_database.add_attachments([attachment1])
+
+        attachment2 = Attachment(
+            id=100,
+            message_id=1000,
+            message_content="Updated",
+            author_id=12345,
+            timestamp=datetime.datetime.now(),
+            reaction_count=10,
+            original_filename="updated.jpg",
+            local_path="1000/100_updated.jpg",
+        )
+        await message_database.add_attachments([attachment2])
+
+        async with message_database.conn.execute(
+            "SELECT message_content, reaction_count, local_path FROM attachments WHERE id = ?",
+            (100,),
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == "Updated"
+        assert row[1] == 10
+        assert row[2] == "1000/100_updated.jpg"
