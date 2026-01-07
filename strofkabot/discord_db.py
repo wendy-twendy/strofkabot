@@ -1,10 +1,11 @@
 # discord_db.py
 
-import aiosqlite
-from pathlib import Path
 import datetime
 from dataclasses import dataclass
-from typing import List, Optional
+from pathlib import Path
+
+import aiosqlite
+
 
 @dataclass
 class Message:
@@ -13,14 +14,14 @@ class Message:
     timestamp: datetime.datetime
     reaction_count: int
     author_id: int
-    reply_to_id: Optional[int] = None
-    reply_to_author: Optional[str] = None
-    reply_to_content: Optional[str] = None
+    reply_to_id: int | None = None
+    reply_to_author: str | None = None
+    reply_to_content: str | None = None
 
 class MessageDatabase:
     def __init__(self, db_path: Path):
         self.db_path = db_path
-        self.conn: Optional[aiosqlite.Connection] = None
+        self.conn: aiosqlite.Connection | None = None
 
     async def initialize(self):
         if self.conn is None:
@@ -52,13 +53,13 @@ class MessageDatabase:
         ''')
         await self.conn.commit()
 
-    async def add_messages(self, messages: List[Message]):
+    async def add_messages(self, messages: list[Message]):
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
         async with self.conn.executemany('''
-            INSERT OR REPLACE INTO messages 
-            (id, content, timestamp, reaction_count, author_id, reply_to_id, reply_to_author, reply_to_content) 
+            INSERT OR REPLACE INTO messages
+            (id, content, timestamp, reaction_count, author_id, reply_to_id, reply_to_author, reply_to_content)
             VALUES (:id, :content, :timestamp, :reaction_count, :author_id, :reply_to_id, :reply_to_author, :reply_to_content)
         ''', [msg.__dict__ for msg in messages]):
             pass
@@ -70,12 +71,12 @@ class MessageDatabase:
             raise RuntimeError("Database not initialized.")
         key = f"last_scanned_timestamp_{channel_id}"
         await self.conn.execute('''
-            INSERT OR REPLACE INTO metadata (key, value) 
+            INSERT OR REPLACE INTO metadata (key, value)
             VALUES (?, ?)
         ''', (key, timestamp.isoformat()))
         await self.conn.commit()
 
-    async def get_last_scanned_timestamp(self, channel_id: int) -> Optional[datetime.datetime]:
+    async def get_last_scanned_timestamp(self, channel_id: int) -> datetime.datetime | None:
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
@@ -86,7 +87,7 @@ class MessageDatabase:
                 return datetime.datetime.fromisoformat(row[0])
             return None
 
-    async def get_random_message(self) -> Optional[Message]:
+    async def get_random_message(self) -> Message | None:
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")

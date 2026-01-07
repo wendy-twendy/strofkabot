@@ -3,7 +3,9 @@
 
 # pylint: disable=redefined-outer-name
 import pytest
+
 from strofkabot.message_filter import MessageFilter
+
 
 @pytest.fixture
 def message_filter():

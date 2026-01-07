@@ -3,10 +3,12 @@
     random Artan Kastro Quotes
 """
 import pathlib
-import yaml
 import random
 
-class ArtanQuotes():
+import yaml
+
+
+class ArtanQuotes:
     def __init__(self, quotes_file_path: pathlib.Path):
         self.quotes = self._extract_quotes(quotes_file_path)
 
@@ -32,6 +34,6 @@ class ArtanQuotes():
                 raise ValueError(f"Unable to parse yaml file: {quotes_file_path}") from exc
 
     def get_random_quote(self):
-        """ Get a random quotes from the quotes list """ 
+        """ Get a random quotes from the quotes list """
         index = random.randrange(len(self.quotes))
         return self.quotes[index]

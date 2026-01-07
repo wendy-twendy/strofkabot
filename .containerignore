@@ -1,0 +1,16 @@
+venv/
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+.git/
+.gitignore
+.env
+*.sqlite3
+*.db
+tests/
+.claude/
+CLAUDE.md
+README.md
+bash.sh
+data/db.sqlite3
