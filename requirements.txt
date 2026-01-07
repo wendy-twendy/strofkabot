@@ -16,4 +16,4 @@ pytest-cov>=4.1.0
 dpytest>=0.7.0
 
 # Linting
-ruff>=0.1.0
+ruff>=0.1.0pre-commit
