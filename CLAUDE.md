@@ -4,22 +4,26 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Build and Run Commands
 
-```bash
-# Create and activate virtual environment
-python3 -m venv .venv
-source .venv/bin/activate
+**IMPORTANT: Always use the virtual environment for installing packages and running commands.**
 
-# Install dependencies
-pip install -r requirements.txt
+```bash
+# Create virtual environment (first time only)
+python3 -m venv .venv
+
+# Install dependencies (use venv pip)
+.venv/bin/pip install -r requirements.txt
 
 # Run the bot
-python strofkabot/llumi.py [--log-level {DEBUG|INFO|WARNING|ERROR|CRITICAL}]
+.venv/bin/python strofkabot/llumi.py [--log-level {DEBUG|INFO|WARNING|ERROR|CRITICAL}]
 
 # Run tests
-pytest tests/
+.venv/bin/pytest tests/
 
 # Run a single test file
-pytest tests/test_message_filter.py
+.venv/bin/pytest tests/test_message_filter.py
+
+# Run linter
+.venv/bin/ruff check .
 ```
 
 ## Container (Production)
