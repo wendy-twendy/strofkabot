@@ -215,3 +215,49 @@ class TestClusterPlot:
         result = generate_cluster_plot(data, labels, names)
 
         assert isinstance(result, io.BytesIO)
+
+
+class TestActivityHeatmap:
+    """Tests for activity heatmap visualization."""
+
+    def test_create_activity_heatmap_returns_bytesio(self):
+        """Test that heatmap returns BytesIO with PNG data."""
+        from strofkabot.utils import create_activity_heatmap
+
+        data = np.random.randint(0, 100, size=(7, 24))
+
+        result = create_activity_heatmap(data, "TestUser")
+
+        assert isinstance(result, io.BytesIO)
+        result.seek(0)
+        assert result.read(4) == b"\x89PNG"
+
+    def test_create_activity_heatmap_zero_data(self):
+        """Test heatmap handles all-zero data without error."""
+        from strofkabot.utils import create_activity_heatmap
+
+        data = np.zeros((7, 24), dtype=int)
+
+        result = create_activity_heatmap(data, "InactiveUser")
+
+        assert isinstance(result, io.BytesIO)
+
+    def test_create_activity_heatmap_with_timezone_label(self):
+        """Test custom timezone label is accepted."""
+        from strofkabot.utils import create_activity_heatmap
+
+        data = np.random.randint(0, 50, size=(7, 24))
+
+        result = create_activity_heatmap(data, "User", timezone_label="CET")
+
+        assert isinstance(result, io.BytesIO)
+
+    def test_create_activity_heatmap_ready_for_reading(self):
+        """Test that buffer position is at start."""
+        from strofkabot.utils import create_activity_heatmap
+
+        data = np.ones((7, 24), dtype=int) * 10
+
+        result = create_activity_heatmap(data, "User")
+
+        assert result.tell() == 0

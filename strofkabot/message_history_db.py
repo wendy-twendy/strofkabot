@@ -64,6 +64,8 @@ class MessageHistoryDatabase:
 
             CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
             CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_messages_author_timestamp
+                ON messages(author_id, timestamp);
         """)
         await self.conn.commit()
 
@@ -134,6 +136,43 @@ class MessageHistoryDatabase:
         async with self.conn.execute("SELECT COUNT(*) FROM messages") as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
+
+    async def get_hourly_activity_by_user(
+        self, author_id: int, timezone_offset: int = 0
+    ) -> list[tuple[int, int, int]]:
+        """Get message counts by day-of-week and hour for a user (last 3 months).
+
+        Args:
+            author_id: Discord user ID to query.
+            timezone_offset: Hours offset from UTC (e.g., +1 for CET, -5 for EST).
+
+        Returns:
+            List of (day_of_week, hour, count) tuples.
+            day_of_week: 0=Sunday through 6=Saturday (SQLite convention).
+            hour: 0-23.
+        """
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        # Build timezone offset string for SQLite datetime modifier
+        offset_str = f"{timezone_offset:+d} hours"
+
+        query = """
+            SELECT
+                CAST(strftime('%w', datetime(timestamp, ?)) AS INTEGER) as day_of_week,
+                CAST(strftime('%H', datetime(timestamp, ?)) AS INTEGER) as hour,
+                COUNT(*) as message_count
+            FROM messages
+            WHERE author_id = ?
+              AND timestamp >= date('now', '-3 months')
+            GROUP BY day_of_week, hour
+            ORDER BY day_of_week, hour
+        """
+
+        async with self.conn.execute(query, (offset_str, offset_str, author_id)) as cursor:
+            rows = await cursor.fetchall()
+            return [(row[0], row[1], row[2]) for row in rows]
 
     async def close(self):
         if self.conn:

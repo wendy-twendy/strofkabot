@@ -6,6 +6,7 @@ import datetime
 import logging
 import os
 import random
+import re
 import signal
 import sys
 
@@ -34,6 +35,7 @@ from strofkabot.utils import (
     compute_all_affinities,
     compute_community_layout,
     compute_node_activity,
+    create_activity_heatmap,
     create_gdp_plot,
     create_hdi_plot,
     create_monthly_inflation_plot,
@@ -42,6 +44,7 @@ from strofkabot.utils import (
     detect_communities,
     fetch_gdp_data,
     fetch_hdi_data,
+    fetch_hourly_activity_data,
     fetch_inflation_data,
     format_period_string,
     get_reaction_trade_data,
@@ -587,6 +590,71 @@ class LlumiBot(commands.Cog):
             self.logger.exception("Error generating connections")
             await ctx.send("An error occurred while generating the connections.")
 
+    @commands.command(name="cluster", help="Shows social clusters. Usage: !cluster [months]")
+    async def show_clusters(self, ctx: commands.Context, months: int = 1):
+        """Show social clusters using Louvain community detection."""
+        try:
+            self.logger.info(f"Generating clusters for {months} month(s)")
+
+            # Validate months parameter
+            if months < 1:
+                await ctx.send("Number of months must be at least 1.")
+                return
+            if months > 12:
+                await ctx.send("Number of months must be at most 12.")
+                return
+
+            # Calculate rolling window start
+            start_year, start_month = get_rolling_start_month(months)
+
+            # Fetch data
+            reaction_data = await self.user_stats.get_reaction_network_rolling(
+                start_year, start_month
+            )
+
+            if not reaction_data:
+                await ctx.send("No reaction data available for this period.")
+                return
+
+            # Build graph
+            directed_graph = build_reaction_graph(reaction_data)
+
+            # Detect communities with resolution=1.5
+            communities = detect_communities(directed_graph, resolution=1.5)
+
+            if not communities:
+                await ctx.send("No communities detected for this period.")
+                return
+
+            # Group members by community
+            community_groups: dict[int, list[str]] = {}
+            for member, comm_id in communities.items():
+                if comm_id not in community_groups:
+                    community_groups[comm_id] = []
+                community_groups[comm_id].append(member)
+
+            # Sort groups by size (largest first) and members alphabetically
+            sorted_groups = sorted(community_groups.items(), key=lambda x: (-len(x[1]), x[0]))
+
+            # Format period string
+            period_str = format_period_string(start_year, start_month, months)
+
+            # Build response
+            response = f"**Social Clusters** ({period_str})\n"
+            response += f"*{len(sorted_groups)} communities detected*\n```\n"
+
+            for comm_id, members in sorted_groups:
+                members_sorted = sorted(members)
+                response += f"Group {comm_id + 1} ({len(members)}): {', '.join(members_sorted)}\n"
+
+            response += "```"
+
+            await ctx.send(response)
+            self.logger.info("Clusters sent successfully")
+        except Exception:
+            self.logger.exception("Error generating clusters")
+            await ctx.send("An error occurred while generating clusters.")
+
     @commands.command(
         name="on-this-day",
         aliases=["otd"],
@@ -793,6 +861,73 @@ class LlumiBot(commands.Cog):
 
         prediction_text = " ".join(words[date_word_count:]) if date_word_count > 0 else ""
         return parsed_date, prediction_text
+
+    @commands.command(
+        name="activity",
+        help="Shows activity heatmap. Usage: !activity [@user] [--tz OFFSET]",
+    )
+    async def show_activity_heatmap(self, ctx: commands.Context, *, args: str = ""):
+        """Display an hourly activity heatmap for a user.
+
+        Optional arguments:
+            @user: Mention a user to see their heatmap (default: self)
+            --tz OFFSET: Timezone offset from UTC (e.g., --tz +1 for CET, --tz -5 for EST)
+        """
+        message_history_db = self.task_manager.message_history_db
+        if not message_history_db:
+            await ctx.send("Activity data is not available.")
+            return
+
+        try:
+            # Parse target user (mentioned or self)
+            target_user = ctx.message.mentions[0] if ctx.message.mentions else ctx.author
+
+            # Parse timezone offset
+            timezone_offset = 0
+            timezone_label = "UTC"
+            tz_match = re.search(r"--tz\s*([+-]?\d+)", args.lower())
+            if tz_match:
+                timezone_offset = int(tz_match.group(1))
+                timezone_offset = max(-12, min(14, timezone_offset))  # Clamp to valid range
+                sign = "+" if timezone_offset >= 0 else ""
+                timezone_label = f"UTC{sign}{timezone_offset}"
+
+            self.logger.info(
+                f"Generating activity heatmap for user {target_user.id} "
+                f"(tz_offset={timezone_offset})"
+            )
+
+            # Ensure database is initialized
+            await message_history_db.ensure_connection()
+
+            # Fetch data
+            activity_data = await fetch_hourly_activity_data(
+                message_history_db, target_user.id, timezone_offset
+            )
+
+            if activity_data is None or activity_data.sum() == 0:
+                await ctx.send(f"No activity data found for {target_user.display_name}.")
+                return
+
+            # Generate plot
+            plot = create_activity_heatmap(
+                activity_data,
+                target_user.display_name,
+                timezone_label,
+            )
+
+            file = discord.File(fp=plot, filename="activity_heatmap.png")
+            total_messages = int(activity_data.sum())
+            await ctx.send(
+                f"**Activity Heatmap for {target_user.display_name}**\n"
+                f"*Based on {total_messages:,} messages (last 3 months)*",
+                file=file,
+            )
+            self.logger.info(f"Activity heatmap sent for user {target_user.id}")
+
+        except Exception:
+            self.logger.exception("Error generating activity heatmap")
+            await ctx.send("An error occurred while generating the heatmap.")
 
 
 def setup_logging(log_level: str) -> logging.Logger:

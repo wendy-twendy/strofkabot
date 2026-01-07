@@ -410,3 +410,55 @@ def create_reaction_graph_plot(
     buf.seek(0)
     plt.close()
     return buf
+
+
+def create_activity_heatmap(
+    data: np.ndarray,
+    username: str,
+    timezone_label: str = "UTC",
+) -> io.BytesIO:
+    """Create an hourly activity heatmap for a user.
+
+    Args:
+        data: 7x24 numpy array (days x hours) with message counts.
+              Rows: days (0=Monday through 6=Sunday).
+              Columns: hours (0-23).
+        username: Display name for the plot title.
+        timezone_label: Timezone label for display (e.g., "UTC", "CET").
+
+    Returns:
+        BytesIO buffer containing the PNG image.
+    """
+    plt.figure(figsize=(14, 5))
+
+    # Day labels (Monday first, Sunday last)
+    day_labels = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+    hour_labels = [f"{h:02d}" for h in range(24)]
+
+    # Create heatmap using seaborn
+    sns.heatmap(
+        data,
+        xticklabels=hour_labels,
+        yticklabels=day_labels,
+        cmap="YlOrRd",
+        cbar_kws={"label": "Messages", "shrink": 0.8},
+        linewidths=0.5,
+        linecolor="white",
+    )
+
+    # Styling
+    plt.xlabel(f"Hour ({timezone_label})", fontsize=12)
+    plt.ylabel("Day of Week", fontsize=12)
+    plt.title(f"Activity Heatmap: {username}", fontsize=14, pad=15)
+
+    # Rotate x-axis labels for readability
+    plt.xticks(rotation=0, fontsize=9)
+    plt.yticks(rotation=0, fontsize=10)
+
+    plt.tight_layout()
+
+    buf = io.BytesIO()
+    plt.savefig(buf, format="png", dpi=150, bbox_inches="tight")
+    buf.seek(0)
+    plt.close()
+    return buf

@@ -91,8 +91,8 @@ strofkabot/
   - Methods: `get_gdp_data()`, `get_hdi_data()`, `get_reaction_trade_data()`, `get_reaction_network_for_month()`
 
 **Utilities**: `strofkabot/utils/` package with specialized modules:
-- `visualization.py` - All plot generation (inflation, GDP, HDI, reaction matrix, clusters)
-- `data_processing.py` - Data fetching via DAL, inflation calculations, clustering
+- `visualization.py` - All plot generation (inflation, GDP, HDI, reaction matrix, clusters, activity heatmap)
+- `data_processing.py` - Data fetching via DAL, inflation calculations, clustering, hourly activity
 - `discord_helpers.py` - Leaderboard display, personal stats, most-liked rankings, `get_reply_info()`
 - `date_utils.py` - Month arithmetic with year boundary handling
 
@@ -112,7 +112,7 @@ strofkabot/
 
 ### Discord Commands
 
-Commands are prefixed with `!`: `llumi`, `rpm`, `trade`, `inflation`, `gdp`, `hdi`, `most-liked`, `artan`, `unsubscribe`
+Commands are prefixed with `!`: `llumi`, `rpm`, `trade`, `inflation`, `gdp`, `hdi`, `most-liked`, `artan`, `unsubscribe`, `activity`, `predict`, `connections`, `cluster`, `riekt-graph`
 
 ### Configuration
 

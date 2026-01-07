@@ -176,3 +176,37 @@ def perform_kmeans_clustering(data: np.ndarray, num_clusters: int = 4) -> np.nda
     kmeans = KMeans(n_clusters=num_clusters, random_state=42)
     labels = kmeans.fit_predict(data_normalized)
     return labels
+
+
+async def fetch_hourly_activity_data(
+    message_history_db, user_id: int, timezone_offset: int = 0
+) -> np.ndarray | None:
+    """Fetch hourly activity data for a user and format as 2D array.
+
+    Args:
+        message_history_db: MessageHistoryDatabase instance.
+        user_id: Discord user ID.
+        timezone_offset: Hours offset from UTC.
+
+    Returns:
+        7x24 numpy array where rows are days (Mon-Sun) and columns are hours (0-23).
+        Returns None if no data found.
+    """
+    raw_data = await message_history_db.get_hourly_activity_by_user(user_id, timezone_offset)
+
+    if not raw_data:
+        return None
+
+    # Initialize 7x24 matrix (days x hours)
+    activity_matrix = np.zeros((7, 24), dtype=int)
+
+    # SQLite %w: 0=Sunday, 1=Monday, ..., 6=Saturday
+    # We want: 0=Monday, 1=Tuesday, ..., 6=Sunday
+    # Conversion: (sqlite_day - 1) % 7 maps Sun(0)->6, Mon(1)->0, Tue(2)->1, etc.
+
+    for sqlite_day, hour, count in raw_data:
+        # Convert SQLite day (0=Sun) to display day (0=Mon)
+        display_day = (sqlite_day - 1) % 7
+        activity_matrix[display_day, hour] = count
+
+    return activity_matrix

@@ -6,6 +6,7 @@ from strofkabot.utils.data_processing import (
     calculate_yearly_inflation,
     fetch_gdp_data,
     fetch_hdi_data,
+    fetch_hourly_activity_data,
     fetch_inflation_data,
     get_reaction_trade_data,
     get_reaction_trade_data_for_month,
@@ -34,6 +35,7 @@ from strofkabot.utils.reaction_graph import (
     get_rolling_start_month,
 )
 from strofkabot.utils.visualization import (
+    create_activity_heatmap,
     create_gdp_plot,
     create_hdi_plot,
     create_monthly_inflation_plot,
@@ -48,6 +50,7 @@ __all__ = [
     # Date utilities
     "adjust_month",
     # Visualization
+    "create_activity_heatmap",
     "create_monthly_inflation_plot",
     "create_yearly_inflation_plot",
     "determine_figure_size",
@@ -62,6 +65,7 @@ __all__ = [
     "calculate_yearly_inflation",
     "fetch_gdp_data",
     "fetch_hdi_data",
+    "fetch_hourly_activity_data",
     "get_reaction_trade_data",
     "get_reaction_trade_data_for_month",
     "calculate_reaction_percentage",
