@@ -11,7 +11,7 @@ class TestUserStatsInitialization:
 
     async def test_initialize_creates_all_tables(self, user_stats_db: UserStats):
         """Verify all required tables are created."""
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
         ) as cursor:
             tables = await cursor.fetchall()
@@ -21,16 +21,10 @@ class TestUserStatsInitialization:
         assert 'user_mapping' in table_names
         assert 'user_reactions_monthly' in table_names
 
-    async def test_ensure_connection_initializes_if_needed(self, tmp_path, mock_logger):
-        """Test that ensure_connection initializes database if not connected."""
-        db_path = str(tmp_path / "ensure_test.db")
-        db = UserStats(db_path, logger=mock_logger)
-
-        assert db.conn is None
-        await db.ensure_connection()
-        assert db.conn is not None
-
-        await db.close()
+    async def test_database_connection_initialized(self, user_stats_db: UserStats):
+        """Test that the database connection is properly initialized."""
+        assert user_stats_db.db is not None
+        assert user_stats_db.db.conn is not None
 
 
 class TestStatsAggregation:
@@ -44,7 +38,7 @@ class TestStatsAggregation:
             timestamp=datetime.datetime(2024, 3, 15)
         )
 
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT total_messages, total_reactions FROM user_stats_monthly "
             "WHERE author_id = ? AND year = ? AND month = ?",
             (99999, 2024, 3)
@@ -60,7 +54,7 @@ class TestStatsAggregation:
         await user_stats_db.update_stats(88888, 3, ts)
         await user_stats_db.update_stats(88888, 7, ts)
 
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT total_messages, total_reactions FROM user_stats_monthly "
             "WHERE author_id = ? AND year = ? AND month = ?",
             (88888, 2024, 4)
@@ -80,7 +74,7 @@ class TestStatsAggregation:
         await user_stats_db.batch_update_stats(stats)
 
         # Check 77777 aggregated correctly
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT total_messages, total_reactions FROM user_stats_monthly "
             "WHERE author_id = ? AND year = ? AND month = ?",
             (77777, 2024, 5)
@@ -138,7 +132,7 @@ class TestReactionNetwork:
             timestamp=datetime.datetime(2024, 6, 15)
         )
 
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT reaction_count FROM user_reactions_monthly "
             "WHERE giver_id = ? AND receiver_id = ? AND year = ? AND month = ?",
             (1111, 2222, 2024, 6)
@@ -153,7 +147,7 @@ class TestReactionNetwork:
         for _ in range(5):
             await user_stats_db.update_reaction_stats(3333, 4444, ts)
 
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT reaction_count FROM user_reactions_monthly "
             "WHERE giver_id = ? AND receiver_id = ?",
             (3333, 4444)
@@ -172,7 +166,7 @@ class TestReactionNetwork:
         await user_stats_db.batch_update_reaction_stats(stats)
 
         # Check 1111 -> 2222 aggregated correctly
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT reaction_count FROM user_reactions_monthly "
             "WHERE giver_id = ? AND receiver_id = ? AND year = ? AND month = ?",
             (1111, 2222, 2024, 8)
@@ -214,7 +208,7 @@ class TestUserMapping:
         """Test creating/updating user mapping."""
         await user_stats_db.update_user_mapping(55555, "TestUser")
 
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT username FROM user_mapping WHERE author_id = ?", (55555,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -226,7 +220,7 @@ class TestUserMapping:
         await user_stats_db.update_user_mapping(66666, "OldName")
         await user_stats_db.update_user_mapping(66666, "NewName")
 
-        async with user_stats_db.conn.execute(
+        async with user_stats_db.db.conn.execute(
             "SELECT username FROM user_mapping WHERE author_id = ?", (66666,)
         ) as cursor:
             row = await cursor.fetchone()
@@ -241,12 +235,12 @@ class TestResetStats:
         """Test that reset_stats clears the appropriate tables."""
         await populated_user_stats.reset_stats()
 
-        async with populated_user_stats.conn.execute(
+        async with populated_user_stats.db.conn.execute(
             "SELECT COUNT(*) FROM user_stats_monthly"
         ) as cursor:
             stats_count = (await cursor.fetchone())[0]
 
-        async with populated_user_stats.conn.execute(
+        async with populated_user_stats.db.conn.execute(
             "SELECT COUNT(*) FROM user_reactions_monthly"
         ) as cursor:
             reactions_count = (await cursor.fetchone())[0]

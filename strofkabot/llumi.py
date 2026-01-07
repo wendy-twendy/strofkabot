@@ -19,7 +19,7 @@ from strofkabot.config import (
     GUILD_ID,
     UPDATE_INTERVAL_SECONDS,
 )
-from strofkabot.discord_db import MessageDatabase
+from strofkabot.discord_db import Database
 from strofkabot.message_filter import MessageFilter
 from strofkabot.tasks import BackgroundTaskManager
 from strofkabot.user_stats import UserStats
@@ -49,7 +49,7 @@ class LlumiBot(commands.Cog):
     def __init__(
         self,
         bot: commands.Bot,
-        db: MessageDatabase,
+        db: Database,
         user_stats: UserStats,
         artan_quotes: ArtanQuotes,
         logger: logging.Logger
@@ -71,7 +71,6 @@ class LlumiBot(commands.Cog):
 
     async def cog_load(self):
         await self.db.initialize()
-        await self.user_stats.initialize()
 
     @commands.Cog.listener()
     async def on_ready(self):
@@ -297,8 +296,8 @@ async def main():
     intents.reactions = True
     bot = commands.Bot(command_prefix='!', intents=intents)
 
-    db = MessageDatabase(DATABASE_FILE_LOCATION)
-    user_stats = UserStats(DATABASE_FILE_LOCATION)
+    db = Database(DATABASE_FILE_LOCATION)
+    user_stats = UserStats(db)
 
     try:
         artan_quotes = ArtanQuotes(ARTAN_QUOTES_PATH)
@@ -322,7 +321,6 @@ async def main():
         logger.info("Closing the bot...")
         await bot.close()
         await db.close()
-        await user_stats.close()
         logger.info("Bot shutdown gracefully.")
 
     def signal_handler(sig, frame):

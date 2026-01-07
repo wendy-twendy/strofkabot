@@ -8,7 +8,7 @@ from pathlib import Path
 
 import pytest
 
-from strofkabot.discord_db import Message, MessageDatabase
+from strofkabot.discord_db import Database, Message
 from strofkabot.message_filter import MessageFilter
 from strofkabot.user_stats import UserStats
 
@@ -23,13 +23,13 @@ def temp_db_path(tmp_path: Path) -> Path:
 
 
 @pytest.fixture
-async def message_database(temp_db_path: Path) -> AsyncGenerator[MessageDatabase, None]:
+async def message_database(temp_db_path: Path) -> AsyncGenerator[Database, None]:
     """
-    Fixture providing an initialized MessageDatabase instance.
+    Fixture providing an initialized Database instance.
 
     Yields an initialized database, then cleans up after the test.
     """
-    db = MessageDatabase(temp_db_path)
+    db = Database(temp_db_path)
     await db.initialize()
     yield db
     await db.close()
@@ -48,18 +48,19 @@ async def user_stats_db(temp_db_path: Path, mock_logger: logging.Logger) -> Asyn
     """
     Fixture providing an initialized UserStats instance.
 
-    Yields an initialized database, then cleans up after the test.
+    Yields an initialized UserStats with a Database backend, then cleans up after the test.
     """
-    db = UserStats(str(temp_db_path), logger=mock_logger)
+    db = Database(temp_db_path)
     await db.initialize()
-    yield db
+    user_stats = UserStats(db, logger=mock_logger)
+    yield user_stats
     await db.close()
 
 
 @pytest.fixture
-async def populated_message_db(message_database: MessageDatabase) -> MessageDatabase:
+async def populated_message_db(message_database: Database) -> Database:
     """
-    Fixture providing a MessageDatabase with sample messages.
+    Fixture providing a Database with sample messages.
     """
     sample_messages = [
         Message(

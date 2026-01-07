@@ -9,7 +9,7 @@ from collections.abc import Callable
 import discord
 
 from strofkabot.config import REACT_COUNT_THRESHOLD
-from strofkabot.discord_db import Message, MessageDatabase
+from strofkabot.discord_db import Database, Message
 from strofkabot.message_filter import MessageFilter
 from strofkabot.user_stats import UserStats
 from strofkabot.utils import get_reply_info
@@ -21,7 +21,7 @@ class BackgroundTaskManager:
     def __init__(
         self,
         bot: discord.ext.commands.Bot,
-        db: MessageDatabase,
+        db: Database,
         user_stats: UserStats,
         message_filter: MessageFilter,
         logger: logging.Logger
