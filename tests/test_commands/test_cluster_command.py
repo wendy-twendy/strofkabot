@@ -60,13 +60,14 @@ class TestClusterCommand:
         """Test that !cluster generates text output when data is available."""
         bot, mock_db, mock_user_stats, cog = bot_with_mocked_db
 
+        # High reaction counts to pass min_activity=20 threshold
         mock_user_stats.get_reaction_network_rolling.return_value = [
-            ("Alice", "Bob", 10),
-            ("Bob", "Alice", 8),
-            ("Charlie", "Diana", 5),
-            ("Diana", "Charlie", 6),
-            ("Alice", "Charlie", 2),
-            ("Charlie", "Alice", 3),
+            ("Alice", "Bob", 15),
+            ("Bob", "Alice", 15),
+            ("Charlie", "Diana", 12),
+            ("Diana", "Charlie", 12),
+            ("Alice", "Charlie", 5),
+            ("Charlie", "Alice", 5),
         ]
 
         await dpytest.message("!cluster")
@@ -74,16 +75,17 @@ class TestClusterCommand:
         msg = dpytest.get_message()
         assert msg is not None
         assert "Social Clusters" in msg.content
-        assert "communities detected" in msg.content
+        assert "communities" in msg.content
 
     @pytest.mark.asyncio
     async def test_cluster_shows_member_names(self, bot_with_mocked_db):
         """Test that !cluster shows member names in groups."""
         bot, mock_db, mock_user_stats, cog = bot_with_mocked_db
 
+        # High reaction counts to pass min_activity=20 threshold
         mock_user_stats.get_reaction_network_rolling.return_value = [
-            ("Alice", "Bob", 10),
-            ("Bob", "Alice", 8),
+            ("Alice", "Bob", 15),
+            ("Bob", "Alice", 15),
         ]
 
         await dpytest.message("!cluster")

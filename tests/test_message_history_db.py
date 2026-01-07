@@ -426,3 +426,111 @@ class TestHourlyActivityQuery:
 
         total_count = sum(count for _, _, count in result)
         assert total_count == 1
+
+
+class TestHourlyActivityForMonthQuery:
+    """Tests for hourly activity aggregation by specific month."""
+
+    async def test_get_hourly_activity_for_month_empty_database(
+        self, history_database: MessageHistoryDatabase
+    ):
+        """Test returns empty list for user with no messages in the month."""
+        result = await history_database.get_hourly_activity_by_user_for_month(999999, 2026, 1)
+        assert result == []
+
+    async def test_get_hourly_activity_for_month_returns_data(
+        self, history_database: MessageHistoryDatabase
+    ):
+        """Test returns data for messages in the specified month."""
+        # Create a message in January 2026
+        msg_time = datetime.datetime(2026, 1, 15, 14, 30, tzinfo=datetime.UTC)
+        msg = HistoryMessage(
+            id=100,
+            channel_id=111,
+            channel_name="general",
+            author_id=12345,
+            author_name="TestUser",
+            content="Test message",
+            timestamp=msg_time,
+            reply_to_id=None,
+            reply_to_author=None,
+            reply_to_content=None,
+            reactions="[]",
+        )
+        await history_database.add_messages([msg])
+
+        result = await history_database.get_hourly_activity_by_user_for_month(12345, 2026, 1)
+
+        assert len(result) == 1
+        _, hour, count = result[0]
+        assert hour == 14
+        assert count == 1
+
+    async def test_get_hourly_activity_for_month_excludes_other_months(
+        self, history_database: MessageHistoryDatabase
+    ):
+        """Test that messages from other months are excluded."""
+        # Message in January
+        jan_msg = HistoryMessage(
+            id=1,
+            channel_id=111,
+            channel_name="general",
+            author_id=12345,
+            author_name="TestUser",
+            content="January message",
+            timestamp=datetime.datetime(2026, 1, 15, 10, 0, tzinfo=datetime.UTC),
+            reply_to_id=None,
+            reply_to_author=None,
+            reply_to_content=None,
+            reactions="[]",
+        )
+        # Message in February
+        feb_msg = HistoryMessage(
+            id=2,
+            channel_id=111,
+            channel_name="general",
+            author_id=12345,
+            author_name="TestUser",
+            content="February message",
+            timestamp=datetime.datetime(2026, 2, 15, 10, 0, tzinfo=datetime.UTC),
+            reply_to_id=None,
+            reply_to_author=None,
+            reply_to_content=None,
+            reactions="[]",
+        )
+        await history_database.add_messages([jan_msg, feb_msg])
+
+        # Query for January only
+        result = await history_database.get_hourly_activity_by_user_for_month(12345, 2026, 1)
+
+        total_count = sum(count for _, _, count in result)
+        assert total_count == 1
+
+    async def test_get_hourly_activity_for_month_with_timezone_offset(
+        self, history_database: MessageHistoryDatabase
+    ):
+        """Test timezone offset shifts hours correctly for month query."""
+        # Message at 14:00 UTC
+        msg_time = datetime.datetime(2026, 1, 15, 14, 0, tzinfo=datetime.UTC)
+        msg = HistoryMessage(
+            id=100,
+            channel_id=111,
+            channel_name="general",
+            author_id=12345,
+            author_name="TestUser",
+            content="Test",
+            timestamp=msg_time,
+            reply_to_id=None,
+            reply_to_author=None,
+            reply_to_content=None,
+            reactions="[]",
+        )
+        await history_database.add_messages([msg])
+
+        # Query with +1 timezone offset
+        result = await history_database.get_hourly_activity_by_user_for_month(
+            12345, 2026, 1, timezone_offset=1
+        )
+
+        _, hour, _ = result[0]
+        assert hour == 15  # 14:00 UTC + 1 = 15:00

@@ -174,6 +174,51 @@ class MessageHistoryDatabase:
             rows = await cursor.fetchall()
             return [(row[0], row[1], row[2]) for row in rows]
 
+    async def get_hourly_activity_by_user_for_month(
+        self, author_id: int, year: int, month: int, timezone_offset: int = 0
+    ) -> list[tuple[int, int, int]]:
+        """Get message counts by day-of-week and hour for a user for a specific month.
+
+        Args:
+            author_id: Discord user ID to query.
+            year: Year to filter by.
+            month: Month to filter by (1-12).
+            timezone_offset: Hours offset from UTC (e.g., +1 for CET, -5 for EST).
+
+        Returns:
+            List of (day_of_week, hour, count) tuples.
+            day_of_week: 0=Sunday through 6=Saturday (SQLite convention).
+            hour: 0-23.
+        """
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        # Build timezone offset string for SQLite datetime modifier
+        offset_str = f"{timezone_offset:+d} hours"
+
+        query = """
+            SELECT
+                CAST(strftime('%w', datetime(timestamp, ?)) AS INTEGER) as day_of_week,
+                CAST(strftime('%H', datetime(timestamp, ?)) AS INTEGER) as hour,
+                COUNT(*) as message_count
+            FROM messages
+            WHERE author_id = ?
+              AND strftime('%Y', timestamp) = ?
+              AND strftime('%m', timestamp) = ?
+            GROUP BY day_of_week, hour
+            ORDER BY day_of_week, hour
+        """
+
+        year_str = str(year)
+        month_str = f"{month:02d}"
+
+        async with self.conn.execute(
+            query, (offset_str, offset_str, author_id, year_str, month_str)
+        ) as cursor:
+            rows = await cursor.fetchall()
+            return [(row[0], row[1], row[2]) for row in rows]
+
     async def close(self):
         if self.conn:
             await self.conn.close()

@@ -213,6 +213,44 @@ async def fetch_hourly_activity_data(
     return activity_matrix
 
 
+async def fetch_hourly_activity_data_for_month(
+    message_history_db, user_id: int, year: int, month: int, timezone_offset: int = 0
+) -> np.ndarray | None:
+    """Fetch hourly activity data for a user for a specific month.
+
+    Args:
+        message_history_db: MessageHistoryDatabase instance.
+        user_id: Discord user ID.
+        year: Year to filter by.
+        month: Month to filter by (1-12).
+        timezone_offset: Hours offset from UTC.
+
+    Returns:
+        7x24 numpy array where rows are days (Mon-Sun) and columns are hours (0-23).
+        Returns None if no data found.
+    """
+    raw_data = await message_history_db.get_hourly_activity_by_user_for_month(
+        user_id, year, month, timezone_offset
+    )
+
+    if not raw_data:
+        return None
+
+    # Initialize 7x24 matrix (days x hours)
+    activity_matrix = np.zeros((7, 24), dtype=int)
+
+    # SQLite %w: 0=Sunday, 1=Monday, ..., 6=Saturday
+    # We want: 0=Monday, 1=Tuesday, ..., 6=Sunday
+    # Conversion: (sqlite_day - 1) % 7 maps Sun(0)->6, Mon(1)->0, Tue(2)->1, etc.
+
+    for sqlite_day, hour, count in raw_data:
+        # Convert SQLite day (0=Sun) to display day (0=Mon)
+        display_day = (sqlite_day - 1) % 7
+        activity_matrix[display_day, hour] = count
+
+    return activity_matrix
+
+
 def calculate_normalized_entropy(distribution: list[int]) -> float:
     """Calculate normalized entropy (evenness) for a distribution.
 

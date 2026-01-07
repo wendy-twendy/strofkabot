@@ -1,6 +1,7 @@
 """
 Tests for LlumiBot lifecycle methods.
 """
+
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock
@@ -45,7 +46,7 @@ async def llumi_cog(mock_dependencies):
     intents.members = True
     intents.message_content = True
 
-    bot = commands.Bot(command_prefix='!', intents=intents)
+    bot = commands.Bot(command_prefix="!", intents=intents)
     await bot._async_setup_hook()
 
     cog = LlumiBot(bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
@@ -160,61 +161,3 @@ class TestOnReady:
 
         cog.update_db_task.start.assert_called_once()
         cog.update_usernames_task.start.assert_called_once()
-
-
-class TestOnMessage:
-    """Tests for LlumiBot.on_message."""
-
-    @pytest.mark.asyncio
-    async def test_ignores_bot_messages(self, mock_dependencies):
-        """Test that on_message ignores messages from bots."""
-        mock_db, mock_user_stats, artan_quotes, mock_logger = mock_dependencies
-
-        mock_bot = MagicMock(spec=commands.Bot)
-        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
-        cog.process_commands = AsyncMock()
-
-        # Create bot message
-        mock_message = MagicMock(spec=discord.Message)
-        mock_message.author.bot = True
-        mock_message.content = "Bot message"
-
-        await cog.on_message(mock_message)
-
-        cog.process_commands.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_ignores_empty_content(self, mock_dependencies):
-        """Test that on_message ignores messages with empty content."""
-        mock_db, mock_user_stats, artan_quotes, mock_logger = mock_dependencies
-
-        mock_bot = MagicMock(spec=commands.Bot)
-        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
-        cog.process_commands = AsyncMock()
-
-        # Create message with empty content
-        mock_message = MagicMock(spec=discord.Message)
-        mock_message.author.bot = False
-        mock_message.content = "   "  # Whitespace only
-
-        await cog.on_message(mock_message)
-
-        cog.process_commands.assert_not_called()
-
-    @pytest.mark.asyncio
-    async def test_processes_valid_messages(self, mock_dependencies):
-        """Test that on_message processes valid messages."""
-        mock_db, mock_user_stats, artan_quotes, mock_logger = mock_dependencies
-
-        mock_bot = MagicMock(spec=commands.Bot)
-        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
-        cog.process_commands = AsyncMock()
-
-        # Create valid human message
-        mock_message = MagicMock(spec=discord.Message)
-        mock_message.author.bot = False
-        mock_message.content = "!llumi"
-
-        await cog.on_message(mock_message)
-
-        cog.process_commands.assert_called_once_with(mock_message)

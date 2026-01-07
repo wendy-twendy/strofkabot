@@ -45,7 +45,7 @@ from strofkabot.utils import (
     detect_communities,
     fetch_gdp_data,
     fetch_hdi_data,
-    fetch_hourly_activity_data,
+    fetch_hourly_activity_data_for_month,
     fetch_inflation_data,
     format_period_string,
     get_reaction_trade_data,
@@ -102,12 +102,6 @@ class LlumiBot(commands.Cog):
         self.update_db_task.start()
         self.update_usernames_task.start()
         self.check_predictions_task.start()
-
-    @commands.Cog.listener()
-    async def on_message(self, message: discord.Message):
-        if message.author.bot or not message.content.strip():
-            return
-        await self.process_commands(message)
 
     @commands.command(
         name="llumi", help="Sends a random message or image. Use -i or --image to force an image."
@@ -599,7 +593,7 @@ class LlumiBot(commands.Cog):
             await ctx.send("An error occurred while generating the connections.")
 
     @commands.command(name="cluster", help="Shows social clusters. Usage: !cluster [months]")
-    async def show_clusters(self, ctx: commands.Context, months: int = 1):
+    async def show_clusters(self, ctx: commands.Context, months: int = 3):
         """Show social clusters using Louvain community detection with navigation."""
         # Validate months parameter
         if months < 1:
@@ -637,8 +631,21 @@ class LlumiBot(commands.Cog):
             # Build graph
             directed_graph = build_reaction_graph(reaction_data)
 
+            # Filter low-activity users (min 20 reactions given+received)
+            min_activity = 20
+            activity = compute_node_activity(directed_graph)
+            low_activity_users = [u for u, a in activity.items() if a < min_activity]
+            filtered_graph = directed_graph.copy()
+            filtered_graph.remove_nodes_from(low_activity_users)
+            excluded_count = len(low_activity_users)
+
+            if filtered_graph.number_of_nodes() == 0:
+                period_str = format_period_string(start_year, start_month, months)
+                await ctx.send(f"No users with enough activity for {period_str}.")
+                return
+
             # Detect communities with resolution=1.5
-            communities = detect_communities(directed_graph, resolution=1.5)
+            communities = detect_communities(filtered_graph, resolution=1.5)
 
             if not communities:
                 period_str = format_period_string(start_year, start_month, months)
@@ -660,7 +667,8 @@ class LlumiBot(commands.Cog):
 
             # Build response
             response = f"**Social Clusters** ({period_str})\n"
-            response += f"*{len(sorted_groups)} communities detected*\n```\n"
+            excluded_note = f", {excluded_count} excluded" if excluded_count > 0 else ""
+            response += f"*{len(sorted_groups)} communities{excluded_note}*\n```\n"
 
             for comm_id, members in sorted_groups:
                 members_sorted = sorted(members)
@@ -914,7 +922,7 @@ class LlumiBot(commands.Cog):
         help="Shows activity heatmap. Usage: !activity [@user] [--tz OFFSET]",
     )
     async def show_activity_heatmap(self, ctx: commands.Context, *, args: str = ""):
-        """Display an hourly activity heatmap for a user.
+        """Display an hourly activity heatmap for a user with month navigation.
 
         Optional arguments:
             @user: Mention a user to see their heatmap (default: self)
@@ -925,52 +933,102 @@ class LlumiBot(commands.Cog):
             await ctx.send("Activity data is not available.")
             return
 
-        try:
-            # Parse target user (mentioned or self)
-            target_user = ctx.message.mentions[0] if ctx.message.mentions else ctx.author
+        # Parse target user (mentioned or self)
+        target_user = ctx.message.mentions[0] if ctx.message.mentions else ctx.author
 
-            # Parse timezone offset
-            timezone_offset = 0
-            timezone_label = "UTC"
-            tz_match = re.search(r"--tz\s*([+-]?\d+)", args.lower())
-            if tz_match:
-                timezone_offset = int(tz_match.group(1))
-                timezone_offset = max(-12, min(14, timezone_offset))  # Clamp to valid range
-                sign = "+" if timezone_offset >= 0 else ""
-                timezone_label = f"UTC{sign}{timezone_offset}"
+        # Parse timezone offset
+        timezone_offset = 0
+        tz_match = re.search(r"--tz\s*([+-]?\d+)", args.lower())
+        if tz_match:
+            timezone_offset = int(tz_match.group(1))
+            timezone_offset = max(-12, min(14, timezone_offset))  # Clamp to valid range
+
+        await self._send_activity_heatmap(ctx, target_user, timezone_offset, month_offset=0)
+
+    async def _send_activity_heatmap(
+        self,
+        ctx: commands.Context,
+        target_user: discord.Member,
+        timezone_offset: int,
+        month_offset: int,
+    ):
+        """Send activity heatmap with navigation reactions."""
+        message_history_db = self.task_manager.message_history_db
+
+        try:
+            # Calculate target month
+            now = datetime.datetime.now(datetime.UTC)
+            target_year, target_month = adjust_month(now.year, now.month, month_offset)
+
+            # Build timezone label
+            sign = "+" if timezone_offset >= 0 else ""
+            timezone_label = f"UTC{sign}{timezone_offset}" if timezone_offset != 0 else "UTC"
 
             self.logger.info(
                 f"Generating activity heatmap for user {target_user.id} "
-                f"(tz_offset={timezone_offset})"
+                f"({target_year}-{target_month:02d}, tz_offset={timezone_offset})"
             )
 
             # Ensure database is initialized
             await message_history_db.ensure_connection()
 
-            # Fetch data
-            activity_data = await fetch_hourly_activity_data(
-                message_history_db, target_user.id, timezone_offset
+            # Fetch data for specific month
+            activity_data = await fetch_hourly_activity_data_for_month(
+                message_history_db, target_user.id, target_year, target_month, timezone_offset
             )
+
+            # Format period string
+            period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
 
             if activity_data is None or activity_data.sum() == 0:
-                await ctx.send(f"No activity data found for {target_user.display_name}.")
-                return
+                # No data for this month - show message with navigation
+                message = await ctx.send(
+                    f"No activity data for {target_user.display_name} in {period_str}."
+                )
+            else:
+                # Generate plot
+                plot = create_activity_heatmap(
+                    activity_data,
+                    target_user.display_name,
+                    timezone_label,
+                )
 
-            # Generate plot
-            plot = create_activity_heatmap(
-                activity_data,
-                target_user.display_name,
-                timezone_label,
-            )
+                file = discord.File(fp=plot, filename="activity_heatmap.png")
+                total_messages = int(activity_data.sum())
+                message = await ctx.send(
+                    f"**Activity Heatmap for {target_user.display_name}**\n"
+                    f"*Based on {total_messages:,} messages ({period_str})*",
+                    file=file,
+                )
+                self.logger.info(f"Activity heatmap sent for user {target_user.id}")
 
-            file = discord.File(fp=plot, filename="activity_heatmap.png")
-            total_messages = int(activity_data.sum())
-            await ctx.send(
-                f"**Activity Heatmap for {target_user.display_name}**\n"
-                f"*Based on {total_messages:,} messages (last 3 months)*",
-                file=file,
-            )
-            self.logger.info(f"Activity heatmap sent for user {target_user.id}")
+            # Add navigation reactions
+            await message.add_reaction("⬅️")
+            await message.add_reaction("➡️")
+
+            # Wait for navigation reactions
+            def check(reaction, user):
+                return (
+                    reaction.message.id == message.id
+                    and str(reaction.emoji) in ["⬅️", "➡️"]
+                    and not user.bot
+                )
+
+            while True:
+                try:
+                    reaction, user = await self.bot.wait_for(
+                        "reaction_add", timeout=60.0, check=check
+                    )
+                    new_offset = month_offset
+                    if str(reaction.emoji) == "⬅️":
+                        new_offset -= 1
+                    elif str(reaction.emoji) == "➡️":
+                        new_offset += 1
+                    await message.delete()
+                    await self._send_activity_heatmap(ctx, target_user, timezone_offset, new_offset)
+                    break
+                except TimeoutError:
+                    break
 
         except Exception:
             self.logger.exception("Error generating activity heatmap")
