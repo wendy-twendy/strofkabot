@@ -1,15 +1,15 @@
 """
-Tests for the MessageDatabase class.
+Tests for the Database class.
 """
 import datetime
 
-from strofkabot.discord_db import Message, MessageDatabase
+from strofkabot.discord_db import Database, Message
 
 
-class TestMessageDatabaseInitialization:
+class TestDatabaseInitialization:
     """Tests for database initialization and table creation."""
 
-    async def test_initialize_creates_tables(self, message_database: MessageDatabase):
+    async def test_initialize_creates_tables(self, message_database: Database):
         """Verify that initialize() creates the required tables."""
         async with message_database.conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table'"
@@ -20,13 +20,13 @@ class TestMessageDatabaseInitialization:
         assert 'messages' in table_names
         assert 'metadata' in table_names
 
-    async def test_ensure_connection_is_idempotent(self, message_database: MessageDatabase):
+    async def test_ensure_connection_is_idempotent(self, message_database: Database):
         """Verify that multiple ensure_connection calls don't fail."""
         await message_database.ensure_connection()
         await message_database.ensure_connection()
         assert message_database.conn is not None
 
-    async def test_close_sets_conn_to_none(self, message_database: MessageDatabase):
+    async def test_close_sets_conn_to_none(self, message_database: Database):
         """Verify that close() properly closes and nulls the connection."""
         await message_database.close()
         assert message_database.conn is None
@@ -35,7 +35,7 @@ class TestMessageDatabaseInitialization:
 class TestMessageCRUD:
     """Tests for message create, read, update operations."""
 
-    async def test_add_single_message(self, message_database: MessageDatabase):
+    async def test_add_single_message(self, message_database: Database):
         """Test adding a single message."""
         msg = Message(
             id=100,
@@ -55,7 +55,7 @@ class TestMessageCRUD:
         assert row[1] == "Test content"
         assert row[3] == 5
 
-    async def test_add_multiple_messages(self, message_database: MessageDatabase):
+    async def test_add_multiple_messages(self, message_database: Database):
         """Test batch adding messages."""
         messages = [
             Message(id=i, content=f"Message {i}", timestamp=datetime.datetime.now(),
@@ -69,7 +69,7 @@ class TestMessageCRUD:
 
         assert count == 5
 
-    async def test_add_message_with_reply_info(self, message_database: MessageDatabase):
+    async def test_add_message_with_reply_info(self, message_database: Database):
         """Test adding a message that is a reply."""
         msg = Message(
             id=200,
@@ -93,7 +93,7 @@ class TestMessageCRUD:
         assert row[1] == "OriginalAuthor"
         assert row[2] == "Original message content"
 
-    async def test_upsert_message_updates_existing(self, message_database: MessageDatabase):
+    async def test_upsert_message_updates_existing(self, message_database: Database):
         """Test that adding a message with existing ID updates it (INSERT OR REPLACE)."""
         msg1 = Message(id=300, content="Original", timestamp=datetime.datetime.now(),
                        reaction_count=1, author_id=1002)
@@ -116,7 +116,7 @@ class TestRandomMessageRetrieval:
     """Tests for random message retrieval."""
 
     async def test_get_random_message_returns_message_object(
-        self, populated_message_db: MessageDatabase
+        self, populated_message_db: Database
     ):
         """Test that get_random_message returns a Message dataclass."""
         msg = await populated_message_db.get_random_message()
@@ -125,13 +125,13 @@ class TestRandomMessageRetrieval:
         assert isinstance(msg, Message)
         assert msg.id in [1, 2, 3]
 
-    async def test_get_random_message_empty_database(self, message_database: MessageDatabase):
+    async def test_get_random_message_empty_database(self, message_database: Database):
         """Test get_random_message on empty database returns None."""
         msg = await message_database.get_random_message()
         assert msg is None
 
     async def test_random_message_timestamp_is_datetime(
-        self, populated_message_db: MessageDatabase
+        self, populated_message_db: Database
     ):
         """Verify that timestamp is properly converted to datetime object."""
         msg = await populated_message_db.get_random_message()
@@ -141,7 +141,7 @@ class TestRandomMessageRetrieval:
 class TestTimestampHandling:
     """Tests for timestamp metadata operations."""
 
-    async def test_update_and_get_last_scanned_timestamp(self, message_database: MessageDatabase):
+    async def test_update_and_get_last_scanned_timestamp(self, message_database: Database):
         """Test storing and retrieving channel scan timestamps."""
         channel_id = 123456789
         timestamp = datetime.datetime(2024, 6, 15, 10, 30, 0)
@@ -151,12 +151,12 @@ class TestTimestampHandling:
 
         assert retrieved == timestamp
 
-    async def test_get_timestamp_for_unscanned_channel(self, message_database: MessageDatabase):
+    async def test_get_timestamp_for_unscanned_channel(self, message_database: Database):
         """Test that unscanned channels return None."""
         result = await message_database.get_last_scanned_timestamp(999999999)
         assert result is None
 
-    async def test_update_timestamp_overwrites(self, message_database: MessageDatabase):
+    async def test_update_timestamp_overwrites(self, message_database: Database):
         """Test that updating timestamp overwrites the previous value."""
         channel_id = 111222333
         ts1 = datetime.datetime(2024, 1, 1, 0, 0, 0)

@@ -11,7 +11,7 @@ import pytest
 from discord.ext import commands
 
 from strofkabot.artan_quotes import ArtanQuotes
-from strofkabot.discord_db import MessageDatabase
+from strofkabot.discord_db import Database
 from strofkabot.llumi import LlumiBot
 from strofkabot.user_stats import UserStats
 
@@ -36,7 +36,7 @@ async def bot_with_mocked_db(tmp_path: Path, mock_logger: logging.Logger):
     await b._async_setup_hook()
 
     # Mock database
-    mock_db = AsyncMock(spec=MessageDatabase)
+    mock_db = AsyncMock(spec=Database)
     mock_user_stats = AsyncMock(spec=UserStats)
 
     # Create mock artan quotes

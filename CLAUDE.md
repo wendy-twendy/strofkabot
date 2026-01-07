@@ -53,8 +53,8 @@ This is a Discord bot for community analytics on the "Strofka" server, tracking 
 strofkabot/
 ├── llumi.py              # Entry point, LlumiBot cog with Discord commands
 ├── config.py             # Constants (GUILD_ID, paths, thresholds)
-├── discord_db.py         # MessageDatabase - stores high-quality messages
-├── user_stats.py         # UserStats - per-user monthly statistics
+├── discord_db.py         # Database - single DAL for all SQLite operations
+├── user_stats.py         # UserStats - business logic for user statistics
 ├── message_filter.py     # MessageFilter - validates message quality
 ├── artan_quotes.py       # ArtanQuotes - quote data for !artan command
 ├── tasks/
@@ -77,10 +77,14 @@ strofkabot/
 - `update_usernames()` - Updates username cache every 24 hours
 
 **Database Layer** (async SQLite via aiosqlite):
-- `strofkabot/discord_db.py` - `MessageDatabase` stores high-quality messages (≥4 reactions, passes filter)
-- `strofkabot/user_stats.py` - `UserStats` tracks per-user monthly statistics and reaction networks
-  - Provides DAL methods: `get_gdp_data()`, `get_hdi_data()`, `get_reaction_trade_data()`, `get_reaction_network_for_month()`
-  - All database queries should go through these methods, not direct `conn` access
+- `strofkabot/discord_db.py` - `Database` is the single DAL for all SQL operations:
+  - Stores high-quality messages (≥4 reactions, passes filter)
+  - Manages user stats tables (`user_stats_monthly`, `user_reactions_monthly`, `user_mapping`)
+  - All raw SQL queries live here
+- `strofkabot/user_stats.py` - `UserStats` provides business logic layer:
+  - Takes a `Database` instance, no direct SQL
+  - Formats query results into dicts, handles logging
+  - Methods: `get_gdp_data()`, `get_hdi_data()`, `get_reaction_trade_data()`, `get_reaction_network_for_month()`
 
 **Utilities**: `strofkabot/utils/` package with specialized modules:
 - `visualization.py` - All plot generation (inflation, GDP, HDI, reaction matrix, clusters)

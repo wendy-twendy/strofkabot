@@ -11,7 +11,7 @@ import pytest
 from discord.ext import commands
 
 from strofkabot.artan_quotes import ArtanQuotes
-from strofkabot.discord_db import MessageDatabase
+from strofkabot.discord_db import Database
 from strofkabot.llumi import LlumiBot, setup_logging
 from strofkabot.message_filter import MessageFilter
 from strofkabot.tasks import BackgroundTaskManager
@@ -29,7 +29,7 @@ async def llumi_cog(tmp_path: Path, mock_logger: logging.Logger):
     await bot._async_setup_hook()
 
     # Mock database
-    mock_db = AsyncMock(spec=MessageDatabase)
+    mock_db = AsyncMock(spec=Database)
     mock_user_stats = AsyncMock(spec=UserStats)
 
     # Create mock artan quotes
@@ -52,7 +52,7 @@ async def task_manager(mock_logger: logging.Logger):
     bot = commands.Bot(command_prefix='!', intents=intents)
     await bot._async_setup_hook()
 
-    mock_db = AsyncMock(spec=MessageDatabase)
+    mock_db = AsyncMock(spec=Database)
     mock_user_stats = AsyncMock(spec=UserStats)
     mock_filter = MagicMock(spec=MessageFilter)
 

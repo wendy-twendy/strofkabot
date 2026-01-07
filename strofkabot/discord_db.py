@@ -406,7 +406,3 @@ class Database:
         '''
         async with self.conn.execute(query, (year, month)) as cursor:
             return await cursor.fetchall()
-
-
-# Backward compatibility alias
-MessageDatabase = Database
