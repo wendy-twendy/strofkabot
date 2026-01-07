@@ -44,6 +44,7 @@ class Prediction:
     created_at: datetime.datetime
     posted: bool
     posted_at: datetime.datetime | None = None
+    retry_count: int = 0
 
 
 class Database:
@@ -122,7 +123,8 @@ class Database:
                 prediction_text TEXT NOT NULL,
                 created_at TEXT NOT NULL,
                 posted BOOLEAN DEFAULT FALSE,
-                posted_at TEXT
+                posted_at TEXT,
+                retry_count INTEGER DEFAULT 0
             );
 
             CREATE INDEX IF NOT EXISTS idx_predictions_target_date
@@ -240,6 +242,26 @@ class Database:
             (author_id, username, current_time),
         ):
             await self.conn.commit()
+
+    async def get_username_by_id(self, author_id: int) -> str | None:
+        """Get username from user_mapping table by author_id.
+
+        Args:
+            author_id: The Discord user ID to look up.
+
+        Returns:
+            The username if found, None otherwise.
+        """
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        async with self.conn.execute(
+            "SELECT username FROM user_mapping WHERE author_id = ?",
+            (author_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else None
 
     async def upsert_reaction_stats(self, giver_id: int, receiver_id: int, year: int, month: int):
         """Insert or update reaction stats between two users."""
@@ -804,8 +826,18 @@ class Database:
         await self.conn.commit()
         return prediction_id
 
-    async def get_due_predictions(self, target_date: datetime.date) -> list[Prediction]:
-        """Get all unposted predictions for target_date or earlier."""
+    async def get_due_predictions(
+        self, target_date: datetime.date, max_retries: int = 5
+    ) -> list[Prediction]:
+        """Get all unposted predictions for target_date or earlier.
+
+        Args:
+            target_date: The date to check for due predictions.
+            max_retries: Maximum retry attempts before a prediction is skipped.
+
+        Returns:
+            List of Prediction objects that are due and haven't exceeded retry limit.
+        """
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
@@ -813,12 +845,14 @@ class Database:
         async with self.conn.execute(
             """
             SELECT id, author_id, author_name, channel_id, target_date,
-                   prediction_text, created_at, posted, posted_at
+                   prediction_text, created_at, posted, posted_at,
+                   COALESCE(retry_count, 0) as retry_count
             FROM predictions
             WHERE target_date <= ? AND posted = FALSE
+              AND COALESCE(retry_count, 0) < ?
             ORDER BY target_date ASC
             """,
-            (target_date.isoformat(),),
+            (target_date.isoformat(), max_retries),
         ) as cursor:
             rows = await cursor.fetchall()
 
@@ -833,6 +867,7 @@ class Database:
                 created_at=datetime.datetime.fromisoformat(row[6]),
                 posted=bool(row[7]),
                 posted_at=(datetime.datetime.fromisoformat(row[8]) if row[8] else None),
+                retry_count=row[9],
             )
             for row in rows
         ]
@@ -853,3 +888,31 @@ class Database:
             (posted_at.isoformat(), prediction_id),
         )
         await self.conn.commit()
+
+    async def increment_prediction_retry(self, prediction_id: int) -> int:
+        """Increment the retry count for a prediction.
+
+        Returns:
+            The new retry count.
+        """
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        await self.conn.execute(
+            """
+            UPDATE predictions
+            SET retry_count = COALESCE(retry_count, 0) + 1
+            WHERE id = ?
+            """,
+            (prediction_id,),
+        )
+        await self.conn.commit()
+
+        # Return the new retry count
+        async with self.conn.execute(
+            "SELECT retry_count FROM predictions WHERE id = ?",
+            (prediction_id,),
+        ) as cursor:
+            row = await cursor.fetchone()
+            return row[0] if row else 0

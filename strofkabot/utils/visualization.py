@@ -123,24 +123,78 @@ def generate_cluster_plot(
 
 def create_gdp_plot(data: list[dict]) -> io.BytesIO:
     """Create a line plot of server GDP (messages per month)."""
-    plt.figure(figsize=(12, 6))
     data = data[::-1]
+    n_points = len(data)
+
+    # Dynamic figure width based on data size
+    fig_width = min(24, 12 + max(0, n_points - 24) * 0.15)
+    fig, ax = plt.subplots(figsize=(fig_width, 6))
+
     months = [f"{record['year']}-{record['month']:02d}" for record in data]
     messages = [record["total_messages"] for record in data]
 
-    plt.plot(
-        months, messages, marker="o", linestyle="-", linewidth=2, markersize=8, color="#ff7f0e"
+    ax.plot(
+        range(n_points),
+        messages,
+        marker="o",
+        linestyle="-",
+        linewidth=2,
+        markersize=8,
+        color="#ff7f0e",
     )
-    plt.fill_between(months, messages, alpha=0.2, color="#ff7f0e")
+    ax.fill_between(range(n_points), messages, alpha=0.2, color="#ff7f0e")
 
-    plt.grid(True, linestyle="--", alpha=0.7)
-    plt.xticks(rotation=45, ha="right")
-    plt.xlabel("Month")
-    plt.ylabel("Total Messages")
-    plt.title("Server GDP (Total Messages per Month)")
+    ax.grid(True, linestyle="--", alpha=0.7)
+    ax.set_xlabel("Month")
+    ax.set_ylabel("Total Messages")
+    ax.set_title("Server GDP (Total Messages per Month)")
 
-    for i, v in enumerate(messages):
-        plt.text(i, v + (max(messages) * 0.02), str(v), ha="center", va="bottom", fontsize=8)
+    # Determine x-axis label interval based on data size
+    if n_points <= 12:
+        x_interval = 1
+    elif n_points <= 36:
+        x_interval = 3
+    elif n_points <= 60:
+        x_interval = 6
+    else:
+        x_interval = 12
+
+    # Set x-ticks at intervals
+    tick_indices = list(range(0, n_points, x_interval))
+    if (n_points - 1) not in tick_indices:
+        tick_indices.append(n_points - 1)
+    ax.set_xticks(tick_indices)
+    ax.set_xticklabels([months[i] for i in tick_indices], rotation=45, ha="right")
+
+    # Determine which count labels to show
+    if n_points <= 24:
+        label_indices = set(range(n_points))
+    else:
+        # Interval-based labels
+        if n_points <= 48:
+            label_interval = 3
+        elif n_points <= 84:
+            label_interval = 6
+        else:
+            label_interval = 12
+        label_indices = set(range(0, n_points, label_interval))
+        # Always include first, last, max, min
+        label_indices.add(0)
+        label_indices.add(n_points - 1)
+        label_indices.add(messages.index(max(messages)))
+        label_indices.add(messages.index(min(messages)))
+
+    # Draw count labels only for selected indices
+    max_val = max(messages)
+    for i in label_indices:
+        ax.text(
+            i,
+            messages[i] + (max_val * 0.02),
+            str(messages[i]),
+            ha="center",
+            va="bottom",
+            fontsize=8,
+        )
 
     plt.tight_layout()
 

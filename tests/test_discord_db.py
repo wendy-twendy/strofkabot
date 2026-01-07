@@ -252,6 +252,17 @@ class TestUserStatsOperations:
 
         assert row[0] == "Alice_New"
 
+    async def test_get_username_by_id(self, message_database: Database):
+        """Test getting username by author_id."""
+        # Test with non-existent user
+        result = await message_database.get_username_by_id(99999)
+        assert result is None
+
+        # Add a user and retrieve
+        await message_database.upsert_user_mapping(12345, "TestUser")
+        result = await message_database.get_username_by_id(12345)
+        assert result == "TestUser"
+
     async def test_fetch_monthly_stats_with_data(self, message_database: Database):
         """Test fetching monthly stats with user mapping JOIN."""
         await message_database.upsert_user_mapping(12345, "Alice")

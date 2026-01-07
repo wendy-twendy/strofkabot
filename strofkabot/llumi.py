@@ -81,6 +81,10 @@ class LlumiBot(commands.Cog):
     async def cog_load(self):
         await self.db.initialize()
 
+    async def cog_unload(self):
+        """Clean up resources when cog is unloaded."""
+        await self.task_manager.close()
+
     @commands.Cog.listener()
     async def on_ready(self):
         self.logger.info(f"Logged in as {self.bot.user} (ID: {self.bot.user.id})")
@@ -625,6 +629,12 @@ class LlumiBot(commands.Cog):
                 )
                 return
 
+            # Get author info
+            author_id = attachment.author_id if attachment else message.author_id
+            username = await self.db.get_username_by_id(author_id)
+            if not username:
+                username = "Unknown"
+
             # Format the header
             years_ago = current_year - selected_year
             years_text = "year" if years_ago == 1 else "years"
@@ -641,9 +651,9 @@ class LlumiBot(commands.Cog):
                     return
 
                 file = discord.File(file_path)
-                content = header
+                content = header + f"\n\n**{username}**"
                 if attachment.message_content:
-                    content += f"\n\n{attachment.message_content}"
+                    content += f"\n{attachment.message_content}"
                 await ctx.send(content=content, file=file)
                 self.logger.info(
                     f"Sent on-this-day attachment from {date_str}: {attachment.original_filename}"
@@ -651,7 +661,7 @@ class LlumiBot(commands.Cog):
             else:
                 response = f"**On This Day** ({years_ago} {years_text} ago - {date_str})\n"
                 response += f"*{message.reaction_count} reactions*\n\n"
-                response += message.content
+                response += f"**{username}**\n{message.content}"
                 await ctx.send(response)
                 self.logger.info(
                     f"Sent on-this-day message from {date_str}: {message.content[:50]}..."

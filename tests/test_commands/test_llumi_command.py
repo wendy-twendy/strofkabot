@@ -205,6 +205,7 @@ class TestOnThisDayCommand:
             ),
             None,
         )
+        mock_db.get_username_by_id.return_value = "TestUser"
 
         with patch("strofkabot.llumi.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
@@ -218,6 +219,7 @@ class TestOnThisDayCommand:
         assert "On This Day" in response.content
         assert "1 year ago" in response.content
         assert "15 reactions" in response.content
+        assert "**TestUser**" in response.content
         assert "Historical message from 2023" in response.content
 
     @pytest.mark.asyncio
@@ -236,6 +238,7 @@ class TestOnThisDayCommand:
             ),
             None,
         )
+        mock_db.get_username_by_id.return_value = "AnotherUser"
 
         with patch("strofkabot.llumi.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
@@ -301,6 +304,7 @@ class TestOnThisDayCommand:
             ),
             None,
         )
+        mock_db.get_username_by_id.return_value = "OldUser"
 
         with patch("strofkabot.llumi.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
@@ -329,6 +333,7 @@ class TestOnThisDayCommand:
             ),
             None,
         )
+        mock_db.get_username_by_id.return_value = "RandomUser"
 
         with patch("strofkabot.llumi.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(

@@ -4,6 +4,7 @@ from pathlib import Path
 
 # Discord configuration
 GUILD_ID = 413619835096924160
+PREDICTIONS_CHANNEL_ID = 1458523811824537621
 
 # Timing configuration
 UPDATE_INTERVAL_SECONDS = 3600 * 24  # 24 hours

@@ -121,26 +121,26 @@ class TestSetupLogging:
         assert logger.level == logging.INFO
 
 
-class TestProcessReactions:
-    """Tests for the _process_reactions method."""
+class TestCollectReactions:
+    """Tests for the _collect_reactions method."""
 
     @pytest.mark.asyncio
     async def test_no_reactions(self, task_manager):
-        """Test processing message with no reactions."""
+        """Test collecting reactions from message with no reactions."""
         manager, _, mock_user_stats = task_manager
 
         mock_message = MagicMock()
         mock_message.reactions = []
         mock_message.author.id = 12345
 
-        await manager._process_reactions(mock_message)
+        result = await manager._collect_reactions(mock_message)
 
-        # Should not call update_reaction_stats
-        mock_user_stats.update_reaction_stats.assert_not_called()
+        # Should return empty list
+        assert result == []
 
     @pytest.mark.asyncio
     async def test_multiple_reactions(self, task_manager):
-        """Test processing message with multiple reactions."""
+        """Test collecting reactions from message with multiple reactions."""
         manager, _, mock_user_stats = task_manager
 
         # Create mock users
@@ -167,10 +167,12 @@ class TestProcessReactions:
         mock_message.author.id = 12345
         mock_message.created_at = datetime.datetime(2024, 1, 15, tzinfo=datetime.UTC)
 
-        await manager._process_reactions(mock_message)
+        result = await manager._collect_reactions(mock_message)
 
-        # Should call update_reaction_stats for each non-bot user
-        assert mock_user_stats.update_reaction_stats.call_count == 2
+        # Should return tuples for each non-bot user
+        assert len(result) == 2
+        assert result[0] == (111, 12345, mock_message.created_at)
+        assert result[1] == (222, 12345, mock_message.created_at)
 
     @pytest.mark.asyncio
     async def test_filters_bot_reactors(self, task_manager):
@@ -200,10 +202,11 @@ class TestProcessReactions:
         mock_message.author.id = 12345
         mock_message.created_at = datetime.datetime(2024, 1, 15, tzinfo=datetime.UTC)
 
-        await manager._process_reactions(mock_message)
+        result = await manager._collect_reactions(mock_message)
 
-        # Only human user should trigger update
-        assert mock_user_stats.update_reaction_stats.call_count == 1
+        # Only human user should be in result
+        assert len(result) == 1
+        assert result[0][0] == 111  # giver_id
 
 
 class TestUpdateUsernames:
@@ -409,14 +412,14 @@ class TestProcessChannel:
         mock_channel.history = empty_history
         mock_db.get_last_scanned_timestamp.return_value = None
 
-        callback = MagicMock()
         scan_until = datetime.datetime.now(datetime.UTC)
 
-        await manager._process_channel(mock_channel, scan_until, callback)
+        msg_count, react_count = await manager._process_channel(mock_channel, scan_until)
 
         # Should update timestamp even with no messages
         mock_db.update_last_scanned_timestamp.assert_called_once()
-        callback.assert_called_once_with(0, 0)
+        assert msg_count == 0
+        assert react_count == 0
 
     @pytest.mark.asyncio
     async def test_process_channel_skips_bot_messages(self, mock_logger):
@@ -456,10 +459,9 @@ class TestProcessChannel:
         mock_channel.history = history_with_bot_message
         mock_db.get_last_scanned_timestamp.return_value = None
 
-        callback = MagicMock()
         scan_until = datetime.datetime.now(datetime.UTC)
 
-        await manager._process_channel(mock_channel, scan_until, callback)
+        await manager._process_channel(mock_channel, scan_until)
 
         # Should not update stats for bot messages
         mock_user_stats.batch_update_stats.assert_not_called()
@@ -508,10 +510,9 @@ class TestProcessChannel:
         mock_channel.history = history_with_empty
         mock_db.get_last_scanned_timestamp.return_value = None
 
-        callback = MagicMock()
         scan_until = datetime.datetime.now(datetime.UTC)
 
-        await manager._process_channel(mock_channel, scan_until, callback)
+        await manager._process_channel(mock_channel, scan_until)
 
         # Should not add stats for empty messages
         mock_user_stats.batch_update_stats.assert_not_called()
@@ -567,10 +568,9 @@ class TestProcessChannel:
         mock_channel.history = history_with_low_react
         mock_db.get_last_scanned_timestamp.return_value = None
 
-        callback = MagicMock()
         scan_until = datetime.datetime.now(datetime.UTC)
 
-        await manager._process_channel(mock_channel, scan_until, callback)
+        await manager._process_channel(mock_channel, scan_until)
 
         # Should not add to messages table (below threshold)
         mock_db.add_messages.assert_not_called()
@@ -627,10 +627,9 @@ class TestProcessChannel:
         mock_channel.history = history_with_filtered
         mock_db.get_last_scanned_timestamp.return_value = None
 
-        callback = MagicMock()
         scan_until = datetime.datetime.now(datetime.UTC)
 
-        await manager._process_channel(mock_channel, scan_until, callback)
+        await manager._process_channel(mock_channel, scan_until)
 
         # Message filter should be called
         mock_filter.is_valid_message.assert_called_with("http://link.com")
@@ -653,10 +652,9 @@ class TestProcessChannel:
         mock_channel.history = empty_history
         mock_db.get_last_scanned_timestamp.return_value = None
 
-        callback = MagicMock()
         scan_until = datetime.datetime(2024, 6, 15, tzinfo=datetime.UTC)
 
-        await manager._process_channel(mock_channel, scan_until, callback)
+        await manager._process_channel(mock_channel, scan_until)
 
         # Should update timestamp with scan_until time
         mock_db.update_last_scanned_timestamp.assert_called_once()
@@ -712,10 +710,9 @@ class TestProcessChannel:
         mock_channel.history = history_with_many
         mock_db.get_last_scanned_timestamp.return_value = None
 
-        callback = MagicMock()
         scan_until = datetime.datetime.now(datetime.UTC)
 
-        await manager._process_channel(mock_channel, scan_until, callback)
+        await manager._process_channel(mock_channel, scan_until)
 
         # Should call batch_update_stats twice: once at 100, once for remaining 50
         assert mock_user_stats.batch_update_stats.call_count == 2
@@ -771,3 +768,124 @@ class TestTaskLoops:
 
         # Should log exception
         assert "Error during periodic username update" in caplog.text
+
+
+class TestPostPrediction:
+    """Tests for the _post_prediction method."""
+
+    @pytest.mark.asyncio
+    async def test_posts_to_predictions_channel(self, task_manager):
+        """Test that prediction is posted to the configured predictions channel."""
+        from strofkabot.config import PREDICTIONS_CHANNEL_ID
+        from strofkabot.discord_db import Prediction
+
+        manager, mock_db, _ = task_manager
+
+        # Create mock channel
+        mock_channel = MagicMock()
+        mock_message = MagicMock()
+        mock_message.add_reaction = AsyncMock()
+        mock_channel.send = AsyncMock(return_value=mock_message)
+
+        # Mock bot.get_channel to return our mock channel
+        manager.bot.get_channel = MagicMock(return_value=mock_channel)
+
+        # Create mock guild and member
+        mock_member = MagicMock()
+        mock_member.display_name = "TestUser"
+        mock_member.display_avatar.url = "https://example.com/avatar.png"
+
+        mock_guild = MagicMock()
+        mock_guild.get_member = MagicMock(return_value=mock_member)
+        manager.guild = mock_guild
+
+        # Create prediction
+        prediction = Prediction(
+            id=1,
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=99999,  # Different from PREDICTIONS_CHANNEL_ID
+            target_date=datetime.date(2025, 1, 15),
+            prediction_text="Test prediction text",
+            created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC),
+            posted=False,
+        )
+
+        await manager._post_prediction(prediction)
+
+        # Should get the predictions channel, not the original channel
+        manager.bot.get_channel.assert_called_once_with(PREDICTIONS_CHANNEL_ID)
+        mock_channel.send.assert_called_once()
+
+    @pytest.mark.asyncio
+    async def test_adds_voting_reactions(self, task_manager):
+        """Test that thumbs up and thumbs down reactions are added."""
+        from strofkabot.discord_db import Prediction
+
+        manager, mock_db, _ = task_manager
+
+        # Create mock channel and message
+        mock_message = MagicMock()
+        mock_message.add_reaction = AsyncMock()
+
+        mock_channel = MagicMock()
+        mock_channel.send = AsyncMock(return_value=mock_message)
+
+        manager.bot.get_channel = MagicMock(return_value=mock_channel)
+
+        # Create mock guild and member
+        mock_member = MagicMock()
+        mock_member.display_name = "TestUser"
+        mock_member.display_avatar.url = "https://example.com/avatar.png"
+
+        mock_guild = MagicMock()
+        mock_guild.get_member = MagicMock(return_value=mock_member)
+        manager.guild = mock_guild
+
+        prediction = Prediction(
+            id=1,
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=99999,
+            target_date=datetime.date(2025, 1, 15),
+            prediction_text="Test prediction text",
+            created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC),
+            posted=False,
+        )
+
+        await manager._post_prediction(prediction)
+
+        # Should add both reactions
+        assert mock_message.add_reaction.call_count == 2
+        calls = mock_message.add_reaction.call_args_list
+        assert calls[0][0][0] == "👍"
+        assert calls[1][0][0] == "👎"
+
+    @pytest.mark.asyncio
+    async def test_logs_warning_when_channel_not_found(self, task_manager, caplog):
+        """Test that warning is logged when predictions channel is not found."""
+        from strofkabot.discord_db import Prediction
+
+        manager, mock_db, _ = task_manager
+
+        # Return None for channel (channel not found)
+        manager.bot.get_channel = MagicMock(return_value=None)
+
+        mock_guild = MagicMock()
+        manager.guild = mock_guild
+
+        prediction = Prediction(
+            id=1,
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=99999,
+            target_date=datetime.date(2025, 1, 15),
+            prediction_text="Test prediction text",
+            created_at=datetime.datetime(2025, 1, 1, tzinfo=datetime.UTC),
+            posted=False,
+        )
+
+        await manager._post_prediction(prediction)
+
+        # Should log warning about channel not found
+        assert "not found" in caplog.text
