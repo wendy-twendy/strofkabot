@@ -1,6 +1,7 @@
 """
 Tests for the Database class.
 """
+
 import datetime
 
 from strofkabot.discord_db import Database, Message
@@ -17,8 +18,8 @@ class TestDatabaseInitialization:
             tables = await cursor.fetchall()
             table_names = [t[0] for t in tables]
 
-        assert 'messages' in table_names
-        assert 'metadata' in table_names
+        assert "messages" in table_names
+        assert "metadata" in table_names
 
     async def test_ensure_connection_is_idempotent(self, message_database: Database):
         """Verify that multiple ensure_connection calls don't fail."""
@@ -42,7 +43,7 @@ class TestMessageCRUD:
             content="Test content",
             timestamp=datetime.datetime(2024, 5, 1, 12, 0, 0),
             reaction_count=5,
-            author_id=999
+            author_id=999,
         )
         await message_database.add_messages([msg])
 
@@ -58,8 +59,13 @@ class TestMessageCRUD:
     async def test_add_multiple_messages(self, message_database: Database):
         """Test batch adding messages."""
         messages = [
-            Message(id=i, content=f"Message {i}", timestamp=datetime.datetime.now(),
-                    reaction_count=i, author_id=1000+i)
+            Message(
+                id=i,
+                content=f"Message {i}",
+                timestamp=datetime.datetime.now(),
+                reaction_count=i,
+                author_id=1000 + i,
+            )
             for i in range(1, 6)
         ]
         await message_database.add_messages(messages)
@@ -79,13 +85,13 @@ class TestMessageCRUD:
             author_id=1001,
             reply_to_id=100,
             reply_to_author="OriginalAuthor",
-            reply_to_content="Original message content"
+            reply_to_content="Original message content",
         )
         await message_database.add_messages([msg])
 
         async with message_database.conn.execute(
             "SELECT reply_to_id, reply_to_author, reply_to_content FROM messages WHERE id = ?",
-            (200,)
+            (200,),
         ) as cursor:
             row = await cursor.fetchone()
 
@@ -95,12 +101,22 @@ class TestMessageCRUD:
 
     async def test_upsert_message_updates_existing(self, message_database: Database):
         """Test that adding a message with existing ID updates it (INSERT OR REPLACE)."""
-        msg1 = Message(id=300, content="Original", timestamp=datetime.datetime.now(),
-                       reaction_count=1, author_id=1002)
+        msg1 = Message(
+            id=300,
+            content="Original",
+            timestamp=datetime.datetime.now(),
+            reaction_count=1,
+            author_id=1002,
+        )
         await message_database.add_messages([msg1])
 
-        msg2 = Message(id=300, content="Updated", timestamp=datetime.datetime.now(),
-                       reaction_count=10, author_id=1002)
+        msg2 = Message(
+            id=300,
+            content="Updated",
+            timestamp=datetime.datetime.now(),
+            reaction_count=10,
+            author_id=1002,
+        )
         await message_database.add_messages([msg2])
 
         async with message_database.conn.execute(
@@ -115,9 +131,7 @@ class TestMessageCRUD:
 class TestRandomMessageRetrieval:
     """Tests for random message retrieval."""
 
-    async def test_get_random_message_returns_message_object(
-        self, populated_message_db: Database
-    ):
+    async def test_get_random_message_returns_message_object(self, populated_message_db: Database):
         """Test that get_random_message returns a Message dataclass."""
         msg = await populated_message_db.get_random_message()
 
@@ -130,9 +144,7 @@ class TestRandomMessageRetrieval:
         msg = await message_database.get_random_message()
         assert msg is None
 
-    async def test_random_message_timestamp_is_datetime(
-        self, populated_message_db: Database
-    ):
+    async def test_random_message_timestamp_is_datetime(self, populated_message_db: Database):
         """Verify that timestamp is properly converted to datetime object."""
         msg = await populated_message_db.get_random_message()
         assert isinstance(msg.timestamp, datetime.datetime)
@@ -180,7 +192,7 @@ class TestUserStatsOperations:
 
         async with message_database.conn.execute(
             "SELECT total_messages, total_reactions FROM user_stats_monthly WHERE author_id = ?",
-            (12345,)
+            (12345,),
         ) as cursor:
             row = await cursor.fetchone()
 
@@ -194,7 +206,7 @@ class TestUserStatsOperations:
 
         async with message_database.conn.execute(
             "SELECT total_messages, total_reactions FROM user_stats_monthly WHERE author_id = ?",
-            (12345,)
+            (12345,),
         ) as cursor:
             row = await cursor.fetchone()
 
@@ -292,7 +304,7 @@ class TestReactionStatsOperations:
 
         async with message_database.conn.execute(
             "SELECT reaction_count FROM user_reactions_monthly WHERE giver_id = ? AND receiver_id = ?",
-            (12345, 67890)
+            (12345, 67890),
         ) as cursor:
             row = await cursor.fetchone()
 
@@ -306,7 +318,7 @@ class TestReactionStatsOperations:
 
         async with message_database.conn.execute(
             "SELECT reaction_count FROM user_reactions_monthly WHERE giver_id = ? AND receiver_id = ?",
-            (12345, 67890)
+            (12345, 67890),
         ) as cursor:
             row = await cursor.fetchone()
 
@@ -356,12 +368,9 @@ class TestComplexQueries:
 
     async def test_fetch_inflation_data_monthly(self, message_database: Database):
         """Test fetching monthly inflation data."""
-        # Set up data for two months
-        await message_database.upsert_user_stats(12345, 2024, 1, 10)
-        await message_database.upsert_user_stats(12345, 2024, 2, 15)
-        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
-        await message_database.upsert_reaction_stats(67890, 12345, 2024, 2)
-        await message_database.upsert_reaction_stats(67890, 12345, 2024, 2)
+        # Set up data for two months (reactions stored in user_stats_monthly)
+        await message_database.upsert_user_stats(12345, 2024, 1, 10)  # 10 reactions
+        await message_database.upsert_user_stats(12345, 2024, 2, 15)  # 15 reactions
 
         result = await message_database.fetch_inflation_data(monthly=True, limit=12)
 
@@ -369,8 +378,9 @@ class TestComplexQueries:
         # Results ordered by year DESC, month DESC
         assert result[0][0] == 2024  # year
         assert result[0][1] == 2  # month
-        assert result[0][2] == 2  # total_reactions for month 2
+        assert result[0][2] == 15  # total_reactions for month 2 (from user_stats_monthly)
         assert result[1][1] == 1  # month 1
+        assert result[1][2] == 10  # total_reactions for month 1
 
     async def test_fetch_inflation_data_yearly(self, message_database: Database):
         """Test fetching yearly inflation data."""
@@ -388,6 +398,34 @@ class TestComplexQueries:
         """Test fetching inflation data from empty database."""
         result = await message_database.fetch_inflation_data(monthly=True, limit=12)
         assert result == []
+
+    async def test_fetch_inflation_uses_user_stats_monthly_reactions(
+        self, message_database: Database
+    ):
+        """Test that inflation query uses user_stats_monthly.total_reactions.
+
+        This is important for retro-scraped data where user_reactions_monthly
+        (who->whom tracking) may not be populated, but user_stats_monthly
+        has the total reaction counts.
+        """
+        # Only populate user_stats_monthly (simulating retro-scraped data)
+        # Do NOT populate user_reactions_monthly
+        await message_database.upsert_user_stats(12345, 2023, 6, 100)  # 100 reactions
+        await message_database.upsert_user_stats(12345, 2024, 6, 150)  # 150 reactions
+
+        # Monthly query should return reactions from user_stats_monthly
+        monthly_result = await message_database.fetch_inflation_data(monthly=True, limit=12)
+        assert len(monthly_result) == 2
+        # Result format: (year, month, total_reactions, total_messages)
+        assert monthly_result[0][2] == 150  # 2024-06 reactions
+        assert monthly_result[1][2] == 100  # 2023-06 reactions
+
+        # Yearly query should also return reactions from user_stats_monthly
+        yearly_result = await message_database.fetch_inflation_data(monthly=False)
+        assert len(yearly_result) == 2
+        # Result format: (year, total_reactions, total_messages)
+        assert yearly_result[0][1] == 100  # 2023 reactions
+        assert yearly_result[1][1] == 150  # 2024 reactions
 
     async def test_fetch_gdp_data(self, message_database: Database):
         """Test fetching GDP (total messages) data."""
@@ -416,8 +454,11 @@ class TestComplexQueries:
         """Test fetching HDI (quality ratio) data."""
         # Add quality messages to messages table
         msg = Message(
-            id=1, content="Quality message", timestamp=datetime.datetime(2024, 1, 15),
-            reaction_count=10, author_id=12345
+            id=1,
+            content="Quality message",
+            timestamp=datetime.datetime(2024, 1, 15),
+            reaction_count=10,
+            author_id=12345,
         )
         await message_database.add_messages([msg])
 
@@ -428,8 +469,8 @@ class TestComplexQueries:
         result = await message_database.fetch_hdi_data(limit=24)
 
         assert len(result) == 1
-        assert result[0][0] == '2024'  # year (string from strftime)
-        assert result[0][1] == '01'  # month (string from strftime)
+        assert result[0][0] == "2024"  # year (string from strftime)
+        assert result[0][1] == "01"  # month (string from strftime)
         assert result[0][2] == 1  # quality_count
         assert result[0][3] == 2  # total_count
         assert result[0][4] == 0.5  # hdi_ratio
@@ -438,8 +479,11 @@ class TestComplexQueries:
         """Test that HDI handles division by zero with NULLIF."""
         # Add a quality message but no user stats
         msg = Message(
-            id=1, content="Quality message", timestamp=datetime.datetime(2024, 1, 15),
-            reaction_count=10, author_id=12345
+            id=1,
+            content="Quality message",
+            timestamp=datetime.datetime(2024, 1, 15),
+            reaction_count=10,
+            author_id=12345,
         )
         await message_database.add_messages([msg])
 
@@ -466,24 +510,24 @@ class TestComplexQueries:
 
         result = await message_database.fetch_trade_data(12345, 2024, 1, limit=5)
 
-        assert result['total_given'] == 3
-        assert result['total_received'] == 5
-        assert result['trade_balance'] == 2  # received - given
+        assert result["total_given"] == 3
+        assert result["total_received"] == 5
+        assert result["trade_balance"] == 2  # received - given
 
         # Check exports (who user gave reactions to)
-        assert len(result['exports']) == 2
-        assert result['exports'][0][0] == 67890  # top export partner
-        assert result['exports'][0][1] == 2  # gave 2 reactions
+        assert len(result["exports"]) == 2
+        assert result["exports"][0][0] == 67890  # top export partner
+        assert result["exports"][0][1] == 2  # gave 2 reactions
 
     async def test_fetch_trade_data_no_activity(self, message_database: Database):
         """Test fetching trade data for user with no reactions."""
         result = await message_database.fetch_trade_data(99999, 2024, 1, limit=5)
 
-        assert result['total_given'] == 0
-        assert result['total_received'] == 0
-        assert result['trade_balance'] == 0
-        assert result['exports'] == []
-        assert result['imports'] == []
+        assert result["total_given"] == 0
+        assert result["total_received"] == 0
+        assert result["trade_balance"] == 0
+        assert result["exports"] == []
+        assert result["imports"] == []
 
     async def test_fetch_reaction_network(self, message_database: Database):
         """Test fetching reaction network for most-liked calculation."""

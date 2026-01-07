@@ -164,3 +164,4 @@ cython_debug/
 
 # Server-specific files
 strofkabot.container
+docs/
