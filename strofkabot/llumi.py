@@ -368,6 +368,59 @@ class LlumiBot(commands.Cog):
             self.logger.exception("Error generating riekt graph")
             await ctx.send("An error occurred while generating the graph.")
 
+    @commands.command(
+        name="connections", help="Shows top 10 mutual relationships. Usage: !connections [months]"
+    )
+    async def show_connections(self, ctx: commands.Context, months: int = 1):
+        try:
+            self.logger.info(f"Generating connections for {months} month(s)")
+
+            # Validate months parameter
+            if months < 1:
+                await ctx.send("Number of months must be at least 1.")
+                return
+            if months > 12:
+                await ctx.send("Number of months must be at most 12.")
+                return
+
+            # Calculate rolling window start
+            start_year, start_month = get_rolling_start_month(months)
+
+            # Fetch data
+            reaction_data = await self.user_stats.get_reaction_network_rolling(
+                start_year, start_month
+            )
+
+            if not reaction_data:
+                await ctx.send("No reaction data available for this period.")
+                return
+
+            # Build graph and compute affinities
+            directed_graph = build_reaction_graph(reaction_data)
+            affinities = compute_all_affinities(directed_graph)
+
+            if not affinities:
+                await ctx.send("No mutual connections found for this period.")
+                return
+
+            # Format period string
+            period_str = format_period_string(start_year, start_month, months)
+
+            # Build response with top 10
+            response = f"**Top 10 Mutual Relationships** ({period_str})\n"
+            response += "*Mutual Affinity Score*\n```\n"
+
+            for i, (user_a, user_b, affinity) in enumerate(affinities[:10], 1):
+                response += f"{i:2}. {user_a} <-> {user_b}: {affinity:.3f}\n"
+
+            response += "```"
+
+            await ctx.send(response)
+            self.logger.info("Connections sent successfully")
+        except Exception:
+            self.logger.exception("Error generating connections")
+            await ctx.send("An error occurred while generating the connections.")
+
     @tasks.loop(seconds=UPDATE_INTERVAL_SECONDS)
     async def update_db_task(self):
         try:
