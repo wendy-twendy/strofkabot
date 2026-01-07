@@ -26,6 +26,7 @@ from strofkabot.message_filter import MessageFilter
 from strofkabot.tasks import BackgroundTaskManager
 from strofkabot.user_stats import UserStats
 from strofkabot.utils import (
+    adjust_month,
     build_affinity_graph,
     build_reaction_graph,
     calculate_monthly_inflation,
@@ -44,6 +45,7 @@ from strofkabot.utils import (
     fetch_inflation_data,
     format_period_string,
     get_reaction_trade_data,
+    get_reaction_trade_data_for_month,
     get_rolling_start_month,
     parse_rpm_args,
     send_leaderboard,
@@ -91,6 +93,7 @@ class LlumiBot(commands.Cog):
         self.task_manager.set_guild(self.guild)
         self.update_db_task.start()
         self.update_usernames_task.start()
+        self.check_predictions_task.start()
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message):
@@ -120,14 +123,21 @@ class LlumiBot(commands.Cog):
                 await ctx.send("No messages available at the moment.")
                 return
 
-            if random.randint(1, total) <= msg_count:
+            # Easter egg: 1/50 chance (2%)
+            if random.randint(1, 50) == 1:
+                await ctx.send("Ik qiu Jordi")
+                self.logger.info("Sent Easter egg message: Ik qiu Jordi")
+                return
+
+            # 50% chance for image (if available), otherwise message
+            if att_count > 0 and random.random() < 0.5:
+                attachment = await self.db.get_random_attachment()
+                await self._send_attachment(ctx, attachment)
+            else:
                 random_message = await self.db.get_random_message()
                 if random_message:
                     await ctx.send(random_message.content)
                     self.logger.info(f"Sent random message: {random_message.content[:50]}...")
-            else:
-                attachment = await self.db.get_random_attachment()
-                await self._send_attachment(ctx, attachment)
 
     async def _send_attachment(self, ctx: commands.Context, attachment):
         """Helper method to send an attachment with optional message content."""
@@ -158,7 +168,10 @@ class LlumiBot(commands.Cog):
             self.logger.warning("Artan quotes not initialized.")
             await ctx.send("Quote feature is currently unavailable.")
 
-    @commands.command(name="rpm", help="Shows reaction statistics for users")
+    @commands.command(
+        name="rpm",
+        help="Shows reaction stats. Use --leaderboard for rankings, --least for lowest, --all for all users.",
+    )
     async def send_rpm_stats(self, ctx: commands.Context, *args):
         self.logger.info(f"RPM command called by {ctx.author} with args: {args}")
         parsed_args = parse_rpm_args(args)
@@ -204,11 +217,32 @@ class LlumiBot(commands.Cog):
             self.logger.exception(f"Error in send_inflation_stats: {str(e)}")
             await ctx.send("An error occurred while fetching inflation statistics.")
 
-    @commands.command(name="trade", help="Shows reaction trading statistics for a user")
-    async def reaction_trade_report(self, ctx: commands.Context, member: discord.Member = None):
+    @commands.command(
+        name="trade", help="Shows reaction trading statistics. Use --yearly for 12-month data."
+    )
+    async def reaction_trade_report(self, ctx: commands.Context, *, args: str = ""):
+        """Show reaction trade report for a user.
+
+        Default: Shows single-month data with arrow navigation.
+        --yearly: Shows rolling 12-month data (original behavior).
+        @member: Optionally specify a member.
+        """
+        # Parse args for --yearly flag and member mention
+        yearly_mode = "--yearly" in args.lower()
+
+        # Extract member mention from args
+        member = ctx.message.mentions[0] if ctx.message.mentions else None
+        target_user = member or ctx.author
+
+        if yearly_mode:
+            await self._send_yearly_trade(ctx, target_user)
+        else:
+            await self._send_monthly_trade(ctx, target_user, month_offset=0)
+
+    async def _send_yearly_trade(self, ctx: commands.Context, target_user: discord.Member):
+        """Send yearly (rolling 12-month) trade report."""
         try:
-            target_user = member or ctx.author
-            self.logger.info(f"Generating trade report for user {target_user.id}")
+            self.logger.info(f"Generating yearly trade report for user {target_user.id}")
             trade_data = await get_reaction_trade_data(self.user_stats, target_user.id, self.guild)
 
             report = f"**Reaction Trade Report for {target_user.display_name}**\n"
@@ -243,16 +277,113 @@ class LlumiBot(commands.Cog):
             report += f"\nTrade Status: {status}```"
 
             await ctx.send(report)
-            self.logger.info(f"Trade report sent for user {target_user.id}")
+            self.logger.info(f"Yearly trade report sent for user {target_user.id}")
         except Exception as e:
-            self.logger.exception(f"Error generating trade report: {e}")
+            self.logger.exception(f"Error generating yearly trade report: {e}")
             await ctx.send("An error occurred while generating the trade report.")
 
-    @commands.command(name="gdp", help="Displays the server's GDP over time")
-    async def show_server_gdp(self, ctx: commands.Context):
+    async def _send_monthly_trade(
+        self, ctx: commands.Context, target_user: discord.Member, month_offset: int
+    ):
+        """Send monthly trade report with navigation reactions."""
         try:
-            self.logger.info("Generating GDP plot")
-            gdp_data = await fetch_gdp_data(self.user_stats)
+            # Get target month
+            now = datetime.datetime.now(datetime.UTC)
+            target_year, target_month = adjust_month(now.year, now.month, month_offset)
+
+            self.logger.info(
+                f"Generating monthly trade report for user {target_user.id} "
+                f"({target_year}-{target_month:02d})"
+            )
+
+            trade_data = await get_reaction_trade_data_for_month(
+                self.user_stats, target_user.id, target_year, target_month, self.guild
+            )
+
+            # Format period string
+            period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
+
+            report = f"**Reaction Trade Report for {target_user.display_name}**\n"
+            report += f"*{period_str}*\n```\n"
+
+            # Check if there's any data
+            has_data = trade_data["total_given"] > 0 or trade_data["total_received"] > 0
+
+            if not has_data:
+                report += "No trading activity this month.\n"
+            else:
+                report += "Top Export Partners (Reactions Given):\n"
+                if trade_data["exports"]:
+                    for partner, count in trade_data["exports"]:
+                        report += f"  {partner:<20} {count:>6}\n"
+                else:
+                    report += "  No reactions given\n"
+
+                report += "\nTop Import Partners (Reactions Received):\n"
+                if trade_data["imports"]:
+                    for partner, count in trade_data["imports"]:
+                        report += f"  {partner:<20} {count:>6}\n"
+                else:
+                    report += "  No reactions received\n"
+
+                report += "\nTrade Summary:\n"
+                report += f"  Total Reactions Given:    {trade_data['total_given']:>6}\n"
+                report += f"  Total Reactions Received: {trade_data['total_received']:>6}\n"
+                report += f"  Trade Balance:            {trade_data['trade_balance']:>6}\n"
+
+                status = (
+                    "SURPLUS"
+                    if trade_data["trade_balance"] > 0
+                    else "DEFICIT"
+                    if trade_data["trade_balance"] < 0
+                    else "NEUTRAL"
+                )
+                report += f"\nTrade Status: {status}"
+
+            report += "```"
+
+            # Send message and add navigation reactions
+            message = await ctx.send(report)
+            await message.add_reaction("⬅️")
+            await message.add_reaction("➡️")
+
+            self.logger.info(f"Monthly trade report sent for user {target_user.id}")
+
+            # Wait for navigation reactions
+            def check(reaction, user):
+                return (
+                    reaction.message.id == message.id
+                    and str(reaction.emoji) in ["⬅️", "➡️"]
+                    and not user.bot
+                )
+
+            while True:
+                try:
+                    reaction, user = await self.bot.wait_for(
+                        "reaction_add", timeout=60.0, check=check
+                    )
+                    new_offset = month_offset
+                    if str(reaction.emoji) == "⬅️":
+                        new_offset -= 1
+                    elif str(reaction.emoji) == "➡️":
+                        new_offset += 1
+                    await message.delete()
+                    await self._send_monthly_trade(ctx, target_user, new_offset)
+                    break
+                except TimeoutError:
+                    break
+        except Exception as e:
+            self.logger.exception(f"Error generating monthly trade report: {e}")
+            await ctx.send("An error occurred while generating the trade report.")
+
+    @commands.command(
+        name="gdp", help="Displays the server's GDP over time. Use --all for full history."
+    )
+    async def show_server_gdp(self, ctx: commands.Context, *, args: str = ""):
+        try:
+            show_all = "--all" in args.lower()
+            self.logger.info(f"Generating GDP plot (show_all={show_all})")
+            gdp_data = await fetch_gdp_data(self.user_stats, show_all=show_all)
 
             if not gdp_data:
                 await ctx.send("No message data available for GDP calculation.")
@@ -369,42 +500,45 @@ class LlumiBot(commands.Cog):
             await ctx.send("An error occurred while generating the graph.")
 
     @commands.command(
-        name="connections", help="Shows top 10 mutual relationships. Usage: !connections [months]"
+        name="connections", help="Shows top 10 mutual relationships with month navigation."
     )
-    async def show_connections(self, ctx: commands.Context, months: int = 1):
+    async def show_connections(self, ctx: commands.Context):
+        """Show top 10 mutual relationships for the current month with navigation."""
+        await self._send_connections(ctx, month_offset=0)
+
+    async def _send_connections(self, ctx: commands.Context, month_offset: int):
+        """Send connections message with navigation reactions."""
         try:
-            self.logger.info(f"Generating connections for {months} month(s)")
+            # Get target month
+            now = datetime.datetime.now(datetime.UTC)
+            target_year, target_month = adjust_month(now.year, now.month, month_offset)
 
-            # Validate months parameter
-            if months < 1:
-                await ctx.send("Number of months must be at least 1.")
+            self.logger.info(f"Generating connections for {target_year}-{target_month:02d}")
+
+            # Fetch single month data
+            rows = await self.user_stats.get_reaction_network_for_month(target_year, target_month)
+
+            if not rows:
+                period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
+                await ctx.send(f"No reaction data available for {period_str}.")
                 return
-            if months > 12:
-                await ctx.send("Number of months must be at most 12.")
-                return
 
-            # Calculate rolling window start
-            start_year, start_month = get_rolling_start_month(months)
-
-            # Fetch data
-            reaction_data = await self.user_stats.get_reaction_network_rolling(
-                start_year, start_month
-            )
-
-            if not reaction_data:
-                await ctx.send("No reaction data available for this period.")
-                return
+            # Convert to tuples for graph functions
+            reaction_data = [
+                (r["giver_username"], r["receiver_username"], r["reaction_count"]) for r in rows
+            ]
 
             # Build graph and compute affinities
             directed_graph = build_reaction_graph(reaction_data)
             affinities = compute_all_affinities(directed_graph)
 
             if not affinities:
-                await ctx.send("No mutual connections found for this period.")
+                period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
+                await ctx.send(f"No mutual connections found for {period_str}.")
                 return
 
             # Format period string
-            period_str = format_period_string(start_year, start_month, months)
+            period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
 
             # Build response with top 10
             response = f"**Top 10 Mutual Relationships** ({period_str})\n"
@@ -415,11 +549,116 @@ class LlumiBot(commands.Cog):
 
             response += "```"
 
-            await ctx.send(response)
+            # Send message and add navigation reactions
+            message = await ctx.send(response)
+            await message.add_reaction("⬅️")
+            await message.add_reaction("➡️")
+
             self.logger.info("Connections sent successfully")
+
+            # Wait for navigation reactions
+            def check(reaction, user):
+                return (
+                    reaction.message.id == message.id
+                    and str(reaction.emoji) in ["⬅️", "➡️"]
+                    and not user.bot
+                )
+
+            while True:
+                try:
+                    reaction, user = await self.bot.wait_for(
+                        "reaction_add", timeout=60.0, check=check
+                    )
+                    new_offset = month_offset
+                    if str(reaction.emoji) == "⬅️":
+                        new_offset -= 1
+                    elif str(reaction.emoji) == "➡️":
+                        new_offset += 1
+                    await message.delete()
+                    await self._send_connections(ctx, new_offset)
+                    break
+                except TimeoutError:
+                    break
         except Exception:
             self.logger.exception("Error generating connections")
             await ctx.send("An error occurred while generating the connections.")
+
+    @commands.command(
+        name="on-this-day",
+        aliases=["otd"],
+        help="Shows a memorable message from this day in a previous year.",
+    )
+    async def on_this_day(self, ctx: commands.Context):
+        """Show the highest-reacted message from this day in a randomly selected past year."""
+        try:
+            today = datetime.datetime.now(datetime.UTC)
+            current_month = today.month
+            current_day = today.day
+            current_year = today.year
+
+            # Get years with messages on this day
+            years = await self.db.get_on_this_day_years(current_month, current_day)
+
+            # Filter out current year (we only want past years)
+            past_years = [y for y in years if y < current_year]
+
+            if not past_years:
+                date_str = today.strftime("%B %d")
+                await ctx.send(
+                    f"No historical messages found for {date_str}. "
+                    "Check back as the archive grows!"
+                )
+                return
+
+            # Randomly select one year
+            selected_year = random.choice(past_years)
+
+            # Get the top message/attachment from that day
+            message, attachment = await self.db.get_top_message_on_this_day(
+                selected_year, current_month, current_day
+            )
+
+            if not message and not attachment:
+                await ctx.send("No content found for this day. Please try again later.")
+                self.logger.warning(
+                    f"Year {selected_year} returned for on-this-day but no content found"
+                )
+                return
+
+            # Format the header
+            years_ago = current_year - selected_year
+            years_text = "year" if years_ago == 1 else "years"
+            date_str = f"{current_month}/{current_day}/{selected_year}"
+
+            if attachment:
+                header = f"**On This Day** ({years_ago} {years_text} ago - {date_str})\n"
+                header += f"*{attachment.reaction_count} reactions*"
+
+                file_path = ATTACHMENTS_DIR / attachment.local_path
+                if not file_path.exists():
+                    self.logger.warning(f"Attachment file not found: {file_path}")
+                    await ctx.send("Could not find the historical image file.")
+                    return
+
+                file = discord.File(file_path)
+                content = header
+                if attachment.message_content:
+                    content += f"\n\n{attachment.message_content}"
+                await ctx.send(content=content, file=file)
+                self.logger.info(
+                    f"Sent on-this-day attachment from {date_str}: {attachment.original_filename}"
+                )
+            else:
+                response = f"**On This Day** ({years_ago} {years_text} ago - {date_str})\n"
+                response += f"*{message.reaction_count} reactions*\n\n"
+                response += message.content
+                await ctx.send(response)
+                self.logger.info(
+                    f"Sent on-this-day message from {date_str}: {message.content[:50]}..."
+                )
+        except Exception:
+            self.logger.exception("Error in on-this-day command")
+            await ctx.send("An error occurred while fetching historical content.")
 
     @tasks.loop(seconds=UPDATE_INTERVAL_SECONDS)
     async def update_db_task(self):
@@ -434,6 +673,116 @@ class LlumiBot(commands.Cog):
             await self.task_manager.update_usernames()
         except Exception:
             self.logger.exception("Error during periodic username update.")
+
+    @tasks.loop(hours=1)
+    async def check_predictions_task(self):
+        try:
+            await self.task_manager.check_predictions()
+        except Exception:
+            self.logger.exception("Error during prediction check.")
+
+    @commands.command(
+        name="predict",
+        help="Make a prediction for a future date. Formats: DD-MM-YYYY, 'tomorrow', 'next week', 'January 15'",
+    )
+    async def make_prediction(self, ctx: commands.Context, *, args: str = ""):
+        """Store a prediction to be posted on the specified future date."""
+        if not args.strip():
+            await ctx.send(
+                "**Usage:** `!predict <date> <prediction text>`\n"
+                "**Date formats:** DD-MM-YYYY (e.g. 25-12-2025), 'tomorrow', 'next week', 'January 15'\n\n"
+                "**Examples:**\n"
+                "• `!predict tomorrow The weather will be sunny`\n"
+                "• `!predict 25-12-2025 Christmas will be white`\n"
+                "• `!predict next week I will finish this project`"
+            )
+            return
+
+        # Parse date from args
+        parsed_date, prediction_text = self._parse_prediction_args(args)
+
+        if not parsed_date:
+            await ctx.send(
+                "I couldn't understand that date. Try formats like DD-MM-YYYY "
+                "(e.g. 25-12-2025), 'tomorrow', 'next week', or 'January 15'."
+            )
+            return
+
+        if not prediction_text.strip():
+            await ctx.send("Please provide some prediction text after the date.")
+            return
+
+        # Validate date is in future
+        today = datetime.datetime.now(datetime.UTC).date()
+        if parsed_date.date() <= today:
+            await ctx.send("That date is in the past! Please provide a future date.")
+            return
+
+        # Validate date isn't too far (max 5 years)
+        max_date = today + datetime.timedelta(days=365 * 5)
+        if parsed_date.date() > max_date:
+            await ctx.send(
+                "That's quite far in the future! Maximum prediction date is 5 years from now."
+            )
+            return
+
+        # Store prediction
+        try:
+            prediction_id = await self.db.add_prediction(
+                author_id=ctx.author.id,
+                author_name=ctx.author.display_name,
+                channel_id=ctx.channel.id,
+                target_date=parsed_date.date(),
+                prediction_text=prediction_text.strip(),
+            )
+
+            # Confirmation with parsed date
+            formatted_date = parsed_date.strftime("%B %d, %Y")
+            embed = discord.Embed(
+                title="Prediction Recorded!",
+                description=prediction_text.strip(),
+                color=discord.Color.blue(),
+            )
+            embed.add_field(name="Will be posted on", value=formatted_date, inline=False)
+            embed.set_footer(text=f"Prediction ID: {prediction_id}")
+
+            await ctx.send(embed=embed)
+            self.logger.info(
+                f"Prediction #{prediction_id} created by {ctx.author} for {formatted_date}"
+            )
+        except Exception:
+            self.logger.exception("Error storing prediction")
+            await ctx.send("An error occurred while storing your prediction.")
+
+    def _parse_prediction_args(self, args: str) -> tuple:
+        """Parse date and text from prediction args.
+
+        Returns tuple of (datetime or None, remaining_text).
+        """
+        import dateparser
+
+        words = args.split()
+        parsed_date = None
+        date_word_count = 0
+
+        # Try progressively longer prefixes as dates (up to 4 words)
+        for i in range(1, min(len(words) + 1, 5)):
+            candidate = " ".join(words[:i])
+            result = dateparser.parse(
+                candidate,
+                settings={
+                    "PREFER_DATES_FROM": "future",
+                    "RETURN_AS_TIMEZONE_AWARE": True,
+                    "TIMEZONE": "UTC",
+                    "DATE_ORDER": "DMY",
+                },
+            )
+            if result:
+                parsed_date = result
+                date_word_count = i
+
+        prediction_text = " ".join(words[date_word_count:]) if date_word_count > 0 else ""
+        return parsed_date, prediction_text
 
 
 def setup_logging(log_level: str) -> logging.Logger:

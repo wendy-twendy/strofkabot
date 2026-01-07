@@ -450,6 +450,19 @@ class TestComplexQueries:
 
         assert len(result) == 3
 
+    async def test_fetch_gdp_data_no_limit(self, message_database: Database):
+        """Test that fetch_gdp_data with limit=None returns all data."""
+        # Insert data for 30 months (more than default limit of 24)
+        for i in range(30):
+            month = (i % 12) + 1
+            year = 2022 + (i // 12)
+            await message_database.upsert_user_stats(12345, year, month, 5)
+
+        result = await message_database.fetch_gdp_data(limit=None)
+
+        # Should return all 30 months, not limited to 24
+        assert len(result) == 30
+
     async def test_fetch_hdi_data(self, message_database: Database):
         """Test fetching HDI (quality ratio) data."""
         # Add quality messages to messages table
@@ -528,6 +541,60 @@ class TestComplexQueries:
         assert result["trade_balance"] == 0
         assert result["exports"] == []
         assert result["imports"] == []
+
+    async def test_fetch_trade_data_for_month(self, message_database: Database):
+        """Test fetching trade data for a single specific month."""
+        # User 12345 gives reactions in January 2024
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 11111, 2024, 1)
+
+        # User 12345 receives reactions in January 2024
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
+        await message_database.upsert_reaction_stats(11111, 12345, 2024, 1)
+
+        # Add data for February 2024 (should NOT be included)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 2)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 2)
+
+        result = await message_database.fetch_trade_data_for_month(12345, 2024, 1, limit=5)
+
+        # Should only include January data
+        assert result["total_given"] == 3
+        assert result["total_received"] == 3
+        assert result["trade_balance"] == 0  # received - given
+
+        # Check exports (who user gave reactions to)
+        assert len(result["exports"]) == 2
+        assert result["exports"][0][0] == 67890  # top export partner
+        assert result["exports"][0][1] == 2  # gave 2 reactions
+
+    async def test_fetch_trade_data_for_month_no_activity(self, message_database: Database):
+        """Test fetching single-month trade data for user with no reactions."""
+        result = await message_database.fetch_trade_data_for_month(99999, 2024, 1, limit=5)
+
+        assert result["total_given"] == 0
+        assert result["total_received"] == 0
+        assert result["trade_balance"] == 0
+        assert result["exports"] == []
+        assert result["imports"] == []
+
+    async def test_fetch_trade_data_for_month_excludes_other_months(
+        self, message_database: Database
+    ):
+        """Test that fetch_trade_data_for_month only queries the specified month."""
+        # Add data for multiple months
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 2)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 3)
+
+        # Query only February
+        result = await message_database.fetch_trade_data_for_month(12345, 2024, 2, limit=5)
+
+        assert result["total_given"] == 1  # Only February data
+        assert len(result["exports"]) == 1
+        assert result["exports"][0][1] == 1
 
     async def test_fetch_reaction_network(self, message_database: Database):
         """Test fetching reaction network for most-liked calculation."""
@@ -768,3 +835,356 @@ class TestAttachmentOperations:
         assert row[0] == "Updated"
         assert row[1] == 10
         assert row[2] == "1000/100_updated.jpg"
+
+
+class TestOnThisDayOperations:
+    """Tests for on-this-day query operations."""
+
+    async def test_get_on_this_day_years_returns_distinct_years(self, message_database: Database):
+        """Test that get_on_this_day_years returns distinct years."""
+        messages = [
+            Message(
+                id=1,
+                content="2022 msg",
+                timestamp=datetime.datetime(2022, 1, 7, 10, 0, 0),
+                reaction_count=5,
+                author_id=123,
+            ),
+            Message(
+                id=2,
+                content="2023 msg",
+                timestamp=datetime.datetime(2023, 1, 7, 14, 0, 0),
+                reaction_count=8,
+                author_id=123,
+            ),
+            Message(
+                id=3,
+                content="Different day",
+                timestamp=datetime.datetime(2023, 1, 8, 10, 0, 0),
+                reaction_count=10,
+                author_id=123,
+            ),
+        ]
+        await message_database.add_messages(messages)
+
+        years = await message_database.get_on_this_day_years(1, 7)
+
+        assert years == [2022, 2023]
+
+    async def test_get_on_this_day_years_includes_attachments(self, message_database: Database):
+        """Test that attachments are included in year results."""
+        attachment = Attachment(
+            id=1,
+            message_id=100,
+            message_content="Test",
+            author_id=123,
+            timestamp=datetime.datetime(2021, 1, 7, 12, 0, 0),
+            reaction_count=10,
+            original_filename="test.jpg",
+            local_path="100/1.jpg",
+        )
+        await message_database.add_attachments([attachment])
+
+        years = await message_database.get_on_this_day_years(1, 7)
+
+        assert 2021 in years
+
+    async def test_get_on_this_day_years_combines_messages_and_attachments(
+        self, message_database: Database
+    ):
+        """Test that both messages and attachments contribute to year list."""
+        msg = Message(
+            id=1,
+            content="2022 message",
+            timestamp=datetime.datetime(2022, 3, 15, 10, 0, 0),
+            reaction_count=5,
+            author_id=123,
+        )
+        att = Attachment(
+            id=1,
+            message_id=100,
+            message_content="2023 attachment",
+            author_id=123,
+            timestamp=datetime.datetime(2023, 3, 15, 12, 0, 0),
+            reaction_count=10,
+            original_filename="test.jpg",
+            local_path="100/1.jpg",
+        )
+        await message_database.add_messages([msg])
+        await message_database.add_attachments([att])
+
+        years = await message_database.get_on_this_day_years(3, 15)
+
+        assert years == [2022, 2023]
+
+    async def test_get_on_this_day_years_empty(self, message_database: Database):
+        """Test that empty database returns empty list."""
+        years = await message_database.get_on_this_day_years(12, 25)
+        assert years == []
+
+    async def test_get_top_message_returns_highest_reacted(self, message_database: Database):
+        """Test that get_top_message returns highest reaction count."""
+        messages = [
+            Message(
+                id=1,
+                content="Low reactions",
+                timestamp=datetime.datetime(2023, 1, 7, 10, 0, 0),
+                reaction_count=5,
+                author_id=123,
+            ),
+            Message(
+                id=2,
+                content="High reactions",
+                timestamp=datetime.datetime(2023, 1, 7, 14, 0, 0),
+                reaction_count=20,
+                author_id=123,
+            ),
+        ]
+        await message_database.add_messages(messages)
+
+        message, attachment = await message_database.get_top_message_on_this_day(2023, 1, 7)
+
+        assert message is not None
+        assert attachment is None
+        assert message.id == 2
+        assert message.reaction_count == 20
+
+    async def test_get_top_message_returns_attachment_when_higher(self, message_database: Database):
+        """Test that attachment is returned when it has more reactions."""
+        msg = Message(
+            id=1,
+            content="Message",
+            timestamp=datetime.datetime(2023, 1, 7, 10, 0, 0),
+            reaction_count=5,
+            author_id=123,
+        )
+        att = Attachment(
+            id=1,
+            message_id=100,
+            message_content="Attachment",
+            author_id=123,
+            timestamp=datetime.datetime(2023, 1, 7, 12, 0, 0),
+            reaction_count=15,
+            original_filename="img.jpg",
+            local_path="100/1.jpg",
+        )
+        await message_database.add_messages([msg])
+        await message_database.add_attachments([att])
+
+        message, attachment = await message_database.get_top_message_on_this_day(2023, 1, 7)
+
+        assert message is None
+        assert attachment is not None
+        assert attachment.reaction_count == 15
+
+    async def test_get_top_message_prefers_message_on_tie(self, message_database: Database):
+        """Test that message is preferred when reaction counts are equal."""
+        msg = Message(
+            id=1,
+            content="Message",
+            timestamp=datetime.datetime(2023, 1, 7, 10, 0, 0),
+            reaction_count=10,
+            author_id=123,
+        )
+        att = Attachment(
+            id=1,
+            message_id=100,
+            message_content="Attachment",
+            author_id=123,
+            timestamp=datetime.datetime(2023, 1, 7, 12, 0, 0),
+            reaction_count=10,
+            original_filename="img.jpg",
+            local_path="100/1.jpg",
+        )
+        await message_database.add_messages([msg])
+        await message_database.add_attachments([att])
+
+        message, attachment = await message_database.get_top_message_on_this_day(2023, 1, 7)
+
+        assert message is not None
+        assert attachment is None
+
+    async def test_get_top_message_no_content(self, message_database: Database):
+        """Test that no content returns (None, None)."""
+        message, attachment = await message_database.get_top_message_on_this_day(2023, 12, 25)
+
+        assert message is None
+        assert attachment is None
+
+    async def test_get_top_message_only_attachment_exists(self, message_database: Database):
+        """Test that attachment is returned when no messages exist."""
+        att = Attachment(
+            id=1,
+            message_id=100,
+            message_content="Only attachment",
+            author_id=123,
+            timestamp=datetime.datetime(2023, 5, 20, 12, 0, 0),
+            reaction_count=8,
+            original_filename="img.jpg",
+            local_path="100/1.jpg",
+        )
+        await message_database.add_attachments([att])
+
+        message, attachment = await message_database.get_top_message_on_this_day(2023, 5, 20)
+
+        assert message is None
+        assert attachment is not None
+        assert attachment.reaction_count == 8
+
+    async def test_get_top_message_only_message_exists(self, message_database: Database):
+        """Test that message is returned when no attachments exist."""
+        msg = Message(
+            id=1,
+            content="Only message",
+            timestamp=datetime.datetime(2023, 5, 20, 10, 0, 0),
+            reaction_count=12,
+            author_id=123,
+        )
+        await message_database.add_messages([msg])
+
+        message, attachment = await message_database.get_top_message_on_this_day(2023, 5, 20)
+
+        assert message is not None
+        assert attachment is None
+        assert message.reaction_count == 12
+
+
+class TestPredictionOperations:
+    """Tests for prediction CRUD operations."""
+
+    async def test_add_prediction_returns_id(self, message_database: Database):
+        """Test that add_prediction returns the new prediction ID."""
+        pred_id = await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 6, 1),
+            prediction_text="Test prediction",
+        )
+        assert pred_id == 1
+
+    async def test_add_prediction_stores_data(self, message_database: Database):
+        """Test that add_prediction correctly stores all fields."""
+        pred_id = await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 6, 1),
+            prediction_text="Test prediction text",
+        )
+
+        async with message_database.conn.execute(
+            "SELECT * FROM predictions WHERE id = ?", (pred_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row is not None
+        assert row[1] == 12345  # author_id
+        assert row[2] == "TestUser"  # author_name
+        assert row[3] == 67890  # channel_id
+        assert row[4] == "2025-06-01"  # target_date
+        assert row[5] == "Test prediction text"  # prediction_text
+        assert row[7] is False or row[7] == 0  # posted (False)
+        assert row[8] is None  # posted_at
+
+    async def test_get_due_predictions_returns_unposted(self, message_database: Database):
+        """Test that get_due_predictions returns unposted predictions."""
+        await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 1, 1),
+            prediction_text="Due prediction",
+        )
+
+        predictions = await message_database.get_due_predictions(datetime.date(2025, 1, 1))
+        assert len(predictions) == 1
+        assert predictions[0].prediction_text == "Due prediction"
+
+    async def test_get_due_predictions_excludes_posted(self, message_database: Database):
+        """Test that posted predictions are excluded."""
+        pred_id = await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 1, 1),
+            prediction_text="Posted prediction",
+        )
+        await message_database.mark_prediction_posted(pred_id)
+
+        predictions = await message_database.get_due_predictions(datetime.date(2025, 1, 1))
+        assert len(predictions) == 0
+
+    async def test_get_due_predictions_includes_overdue(self, message_database: Database):
+        """Test that overdue predictions are included."""
+        await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 1, 1),
+            prediction_text="Overdue prediction",
+        )
+
+        # Query for a later date
+        predictions = await message_database.get_due_predictions(datetime.date(2025, 1, 15))
+        assert len(predictions) == 1
+
+    async def test_get_due_predictions_excludes_future(self, message_database: Database):
+        """Test that future predictions are not returned."""
+        await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 6, 1),
+            prediction_text="Future prediction",
+        )
+
+        # Query for an earlier date
+        predictions = await message_database.get_due_predictions(datetime.date(2025, 1, 1))
+        assert len(predictions) == 0
+
+    async def test_mark_prediction_posted(self, message_database: Database):
+        """Test that mark_prediction_posted updates the prediction."""
+        pred_id = await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 1, 1),
+            prediction_text="Test prediction",
+        )
+
+        await message_database.mark_prediction_posted(pred_id)
+
+        async with message_database.conn.execute(
+            "SELECT posted, posted_at FROM predictions WHERE id = ?", (pred_id,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == 1  # posted = True
+        assert row[1] is not None  # posted_at has a timestamp
+
+    async def test_prediction_dataclass_fields(self, message_database: Database):
+        """Test that returned Prediction has all expected fields."""
+        from strofkabot.discord_db import Prediction
+
+        await message_database.add_prediction(
+            author_id=12345,
+            author_name="TestUser",
+            channel_id=67890,
+            target_date=datetime.date(2025, 1, 1),
+            prediction_text="Test prediction",
+        )
+
+        predictions = await message_database.get_due_predictions(datetime.date(2025, 1, 1))
+        pred = predictions[0]
+
+        assert isinstance(pred, Prediction)
+        assert pred.id == 1
+        assert pred.author_id == 12345
+        assert pred.author_name == "TestUser"
+        assert pred.channel_id == 67890
+        assert pred.target_date == datetime.date(2025, 1, 1)
+        assert pred.prediction_text == "Test prediction"
+        assert pred.posted is False
+        assert pred.posted_at is None
+        assert isinstance(pred.created_at, datetime.datetime)

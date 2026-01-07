@@ -10,14 +10,19 @@ Built with [discord.py](https://github.com/Rapptz/discord.py)
 
 | Command | Description |
 |---------|-------------|
-| `!llumi` | Returns a random high-quality message (4+ reactions) from history |
-| `!rpm [month] [year]` | Shows reactions-per-message leaderboard |
+| `!llumi [-i\|--image]` | Returns a random high-quality message or image. Use `-i` to force an image |
+| `!rpm [--leaderboard] [--least] [--all]` | Shows reaction stats. Default: personal stats. Use `--leaderboard` for rankings |
 | `!inflation` | Displays reaction inflation trends over time |
-| `!trade @user` | Shows reaction trade balance with another user |
-| `!gdp` | Plots server "GDP" (total reactions) over time |
-| `!hdi` | Plots "Human Development Index" (engagement metrics) |
-| `!most-liked` | Shows most liked users for a given month |
+| `!trade [@user] [--yearly]` | Shows reaction trade balance. Default: current month with navigation. `--yearly` for 12-month data |
+| `!gdp [--all]` | Plots server "GDP" (total messages per month). Use `--all` for full history |
+| `!hdi` | Plots server "HDI" (quality messages with 4+ reactions) over time |
+| `!most-liked [--all]` | Shows most liked users for the current month |
+| `!riekt-graph [months]` | Shows reaction network graph. Months: 1-12, default 1 |
+| `!connections` | Shows top 10 mutual relationships with month navigation |
+| `!otd` / `!on-this-day` | Shows a memorable message from this day in a previous year |
+| `!predict <date> <text>` | Make a prediction for a future date (e.g., `tomorrow`, `25-12-2025`) |
 | `!artan` | Returns a random Artan Kastro quote |
+| `!unsubscribe` | Easter egg response |
 
 ## Setup
 

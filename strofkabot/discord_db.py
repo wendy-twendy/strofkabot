@@ -33,6 +33,19 @@ class Attachment:
     local_path: str
 
 
+@dataclass
+class Prediction:
+    id: int
+    author_id: int
+    author_name: str
+    channel_id: int
+    target_date: datetime.date
+    prediction_text: str
+    created_at: datetime.datetime
+    posted: bool
+    posted_at: datetime.datetime | None = None
+
+
 class Database:
     def __init__(self, db_path: Path):
         self.db_path = db_path
@@ -99,6 +112,21 @@ class Database:
                 original_filename TEXT,
                 local_path TEXT
             );
+
+            CREATE TABLE IF NOT EXISTS predictions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                author_id INTEGER NOT NULL,
+                author_name TEXT NOT NULL,
+                channel_id INTEGER NOT NULL,
+                target_date TEXT NOT NULL,
+                prediction_text TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                posted BOOLEAN DEFAULT FALSE,
+                posted_at TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_predictions_target_date
+                ON predictions(target_date, posted);
         """)
         await self.conn.commit()
 
@@ -309,18 +337,32 @@ class Database:
             async with self.conn.execute(query) as cursor:
                 return await cursor.fetchall()
 
-    async def fetch_gdp_data(self, limit: int = 24) -> list[tuple]:
-        """Fetch total messages per month for GDP calculation."""
-        await self.ensure_connection()
-        query = """
-            SELECT year, month, SUM(total_messages) as total_messages
-            FROM user_stats_monthly
-            GROUP BY year, month
-            ORDER BY year DESC, month DESC
-            LIMIT ?
+    async def fetch_gdp_data(self, limit: int | None = 24) -> list[tuple]:
+        """Fetch total messages per month for GDP calculation.
+
+        Args:
+            limit: Maximum number of months to return. If None, returns all data.
         """
-        async with self.conn.execute(query, (limit,)) as cursor:
-            return await cursor.fetchall()
+        await self.ensure_connection()
+        if limit is None:
+            query = """
+                SELECT year, month, SUM(total_messages) as total_messages
+                FROM user_stats_monthly
+                GROUP BY year, month
+                ORDER BY year DESC, month DESC
+            """
+            async with self.conn.execute(query) as cursor:
+                return await cursor.fetchall()
+        else:
+            query = """
+                SELECT year, month, SUM(total_messages) as total_messages
+                FROM user_stats_monthly
+                GROUP BY year, month
+                ORDER BY year DESC, month DESC
+                LIMIT ?
+            """
+            async with self.conn.execute(query, (limit,)) as cursor:
+                return await cursor.fetchall()
 
     async def fetch_hdi_data(self, limit: int = 24) -> list[tuple]:
         """Fetch HDI data (quality messages / total messages) per month."""
@@ -396,6 +438,70 @@ class Database:
 
         async with self.conn.execute(
             total_query, (user_id, year, year, month, user_id, year, year, month)
+        ) as cursor:
+            total_data = await cursor.fetchone()
+
+        total_given, total_received = total_data
+        return {
+            "exports": export_data,
+            "imports": import_data,
+            "total_given": total_given,
+            "total_received": total_received,
+            "trade_balance": total_received - total_given,
+        }
+
+    async def fetch_trade_data_for_month(
+        self, user_id: int, year: int, month: int, limit: int = 5
+    ) -> dict:
+        """Fetch reaction trade data for a specific user for a single month.
+
+        Args:
+            user_id: The Discord user ID.
+            year: The year to query.
+            month: The month to query.
+            limit: Maximum number of top partners to return.
+
+        Returns:
+            Dictionary with exports, imports, total_given, total_received, and trade_balance.
+        """
+        await self.ensure_connection()
+
+        export_query = """
+            SELECT receiver_id, SUM(reaction_count) as total_given
+            FROM user_reactions_monthly
+            WHERE giver_id = ? AND year = ? AND month = ?
+            GROUP BY receiver_id
+            ORDER BY total_given DESC
+            LIMIT ?
+        """
+
+        import_query = """
+            SELECT giver_id, SUM(reaction_count) as total_received
+            FROM user_reactions_monthly
+            WHERE receiver_id = ? AND year = ? AND month = ?
+            GROUP BY giver_id
+            ORDER BY total_received DESC
+            LIMIT ?
+        """
+
+        total_query = """
+            SELECT
+                (SELECT COALESCE(SUM(reaction_count), 0)
+                 FROM user_reactions_monthly
+                 WHERE giver_id = ? AND year = ? AND month = ?) as total_given,
+                (SELECT COALESCE(SUM(reaction_count), 0)
+                 FROM user_reactions_monthly
+                 WHERE receiver_id = ? AND year = ? AND month = ?) as total_received
+        """
+
+        async with self.conn.execute(export_query, (user_id, year, month, limit)) as cursor:
+            export_data = await cursor.fetchall()
+
+        async with self.conn.execute(import_query, (user_id, year, month, limit)) as cursor:
+            import_data = await cursor.fetchall()
+
+        async with self.conn.execute(
+            total_query, (user_id, year, month, user_id, year, month)
         ) as cursor:
             total_data = await cursor.fetchone()
 
@@ -544,3 +650,206 @@ class Database:
         ) as cursor:
             row = await cursor.fetchone()
             return row is not None
+
+    # =========================================================================
+    # On This Day Operations
+    # =========================================================================
+
+    async def get_on_this_day_years(self, month: int, day: int) -> list[int]:
+        """Get distinct years that have messages or attachments on the given month-day.
+
+        Args:
+            month: The month (1-12)
+            day: The day of month (1-31)
+
+        Returns:
+            List of years with content on this day, sorted ascending.
+        """
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        month_day = f"{month:02d}-{day:02d}"
+
+        query = """
+            SELECT DISTINCT strftime('%Y', timestamp) as year
+            FROM (
+                SELECT timestamp FROM messages
+                WHERE strftime('%m-%d', timestamp) = ?
+                UNION ALL
+                SELECT timestamp FROM attachments
+                WHERE strftime('%m-%d', timestamp) = ?
+            )
+            ORDER BY year ASC
+        """
+        async with self.conn.execute(query, (month_day, month_day)) as cursor:
+            rows = await cursor.fetchall()
+            return [int(row[0]) for row in rows]
+
+    async def get_top_message_on_this_day(
+        self, year: int, month: int, day: int
+    ) -> tuple[Message | None, Attachment | None]:
+        """Get the highest-reacted message or attachment from a specific date.
+
+        Args:
+            year: The year
+            month: The month (1-12)
+            day: The day of month (1-31)
+
+        Returns:
+            Tuple of (Message or None, Attachment or None). The one with higher
+            reaction count will be set, the other will be None.
+        """
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        date_prefix = f"{year:04d}-{month:02d}-{day:02d}"
+
+        # Get top message
+        msg_query = """
+            SELECT * FROM messages
+            WHERE timestamp LIKE ? || '%'
+            ORDER BY reaction_count DESC
+            LIMIT 1
+        """
+        async with self.conn.execute(msg_query, (date_prefix,)) as cursor:
+            msg_row = await cursor.fetchone()
+
+        # Get top attachment
+        att_query = """
+            SELECT * FROM attachments
+            WHERE timestamp LIKE ? || '%'
+            ORDER BY reaction_count DESC
+            LIMIT 1
+        """
+        async with self.conn.execute(att_query, (date_prefix,)) as cursor:
+            att_row = await cursor.fetchone()
+
+        # Parse results
+        top_message = None
+        top_attachment = None
+
+        if msg_row:
+            top_message = Message(
+                id=msg_row[0],
+                content=msg_row[1],
+                timestamp=datetime.datetime.fromisoformat(msg_row[2]),
+                reaction_count=msg_row[3],
+                author_id=msg_row[4],
+                reply_to_id=msg_row[5],
+                reply_to_author=msg_row[6],
+                reply_to_content=msg_row[7],
+            )
+
+        if att_row:
+            top_attachment = Attachment(
+                id=att_row[0],
+                message_id=att_row[1],
+                message_content=att_row[2],
+                author_id=att_row[3],
+                timestamp=datetime.datetime.fromisoformat(att_row[4]),
+                reaction_count=att_row[5],
+                original_filename=att_row[6],
+                local_path=att_row[7],
+            )
+
+        # Return the one with higher reaction count
+        if top_message and top_attachment:
+            if top_attachment.reaction_count > top_message.reaction_count:
+                return (None, top_attachment)
+            else:
+                return (top_message, None)
+        elif top_message:
+            return (top_message, None)
+        elif top_attachment:
+            return (None, top_attachment)
+        else:
+            return (None, None)
+
+    # =========================================================================
+    # Prediction Operations
+    # =========================================================================
+
+    async def add_prediction(
+        self,
+        author_id: int,
+        author_name: str,
+        channel_id: int,
+        target_date: datetime.date,
+        prediction_text: str,
+    ) -> int:
+        """Insert a new prediction and return its ID."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        created_at = datetime.datetime.now(datetime.UTC)
+        async with self.conn.execute(
+            """
+            INSERT INTO predictions
+            (author_id, author_name, channel_id, target_date, prediction_text, created_at, posted)
+            VALUES (?, ?, ?, ?, ?, ?, FALSE)
+            """,
+            (
+                author_id,
+                author_name,
+                channel_id,
+                target_date.isoformat(),
+                prediction_text,
+                created_at.isoformat(),
+            ),
+        ) as cursor:
+            prediction_id = cursor.lastrowid
+        await self.conn.commit()
+        return prediction_id
+
+    async def get_due_predictions(self, target_date: datetime.date) -> list[Prediction]:
+        """Get all unposted predictions for target_date or earlier."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        async with self.conn.execute(
+            """
+            SELECT id, author_id, author_name, channel_id, target_date,
+                   prediction_text, created_at, posted, posted_at
+            FROM predictions
+            WHERE target_date <= ? AND posted = FALSE
+            ORDER BY target_date ASC
+            """,
+            (target_date.isoformat(),),
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        return [
+            Prediction(
+                id=row[0],
+                author_id=row[1],
+                author_name=row[2],
+                channel_id=row[3],
+                target_date=datetime.date.fromisoformat(row[4]),
+                prediction_text=row[5],
+                created_at=datetime.datetime.fromisoformat(row[6]),
+                posted=bool(row[7]),
+                posted_at=(datetime.datetime.fromisoformat(row[8]) if row[8] else None),
+            )
+            for row in rows
+        ]
+
+    async def mark_prediction_posted(self, prediction_id: int) -> None:
+        """Mark a prediction as posted."""
+        await self.ensure_connection()
+        if not self.conn:
+            raise RuntimeError("Database not initialized.")
+
+        posted_at = datetime.datetime.now(datetime.UTC)
+        await self.conn.execute(
+            """
+            UPDATE predictions
+            SET posted = TRUE, posted_at = ?
+            WHERE id = ?
+            """,
+            (posted_at.isoformat(), prediction_id),
+        )
+        await self.conn.commit()

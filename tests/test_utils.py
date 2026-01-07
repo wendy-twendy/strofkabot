@@ -742,6 +742,25 @@ class TestFetchGdpData:
 
         assert len(result) <= 24
 
+    @pytest.mark.asyncio
+    async def test_show_all_returns_all_data(self, user_stats_db):
+        """Test that show_all=True returns all data without limit."""
+        import datetime
+
+        # Insert data for many months (more than default 24 limit)
+        stats_data = []
+        for i in range(30):
+            month = (i % 12) + 1
+            year = 2022 + (i // 12)
+            stats_data.append((111, 5, datetime.datetime(year, month, 15)))
+
+        await user_stats_db.batch_update_stats(stats_data)
+
+        result = await fetch_gdp_data(user_stats_db, show_all=True)
+
+        # Should return all 30 months, not limited to 24
+        assert len(result) == 30
+
 
 class TestFetchHdiData:
     """Tests for the fetch_hdi_data function."""

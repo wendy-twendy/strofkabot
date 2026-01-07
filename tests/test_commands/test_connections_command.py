@@ -14,12 +14,12 @@ class TestConnectionsCommand:
         """Test that !connections returns top mutual relationships."""
         bot, mock_db, mock_user_stats, _ = bot_with_mocked_db
 
-        # Mock reaction network data
-        mock_user_stats.get_reaction_network_rolling.return_value = [
-            ("Alice", "Bob", 50),
-            ("Bob", "Alice", 40),
-            ("Alice", "Charlie", 30),
-            ("Charlie", "Alice", 20),
+        # Mock reaction network data (dict format from get_reaction_network_for_month)
+        mock_user_stats.get_reaction_network_for_month.return_value = [
+            {"giver_username": "Alice", "receiver_username": "Bob", "reaction_count": 50},
+            {"giver_username": "Bob", "receiver_username": "Alice", "reaction_count": 40},
+            {"giver_username": "Alice", "receiver_username": "Charlie", "reaction_count": 30},
+            {"giver_username": "Charlie", "receiver_username": "Alice", "reaction_count": 20},
         ]
 
         await dpytest.message("!connections")
@@ -35,46 +35,29 @@ class TestConnectionsCommand:
         """Test that !connections handles empty data gracefully."""
         bot, mock_db, mock_user_stats, _ = bot_with_mocked_db
 
-        mock_user_stats.get_reaction_network_rolling.return_value = []
+        mock_user_stats.get_reaction_network_for_month.return_value = []
 
         await dpytest.message("!connections")
 
-        assert dpytest.verify().message().content("No reaction data available for this period.")
+        response = dpytest.get_message()
+        assert "No reaction data available for" in response.content
 
     @pytest.mark.asyncio
-    async def test_connections_accepts_months_parameter(self, bot_with_mocked_db):
-        """Test that !connections accepts a months parameter."""
+    async def test_connections_shows_current_month(self, bot_with_mocked_db):
+        """Test that !connections shows current month by default."""
         bot, mock_db, mock_user_stats, _ = bot_with_mocked_db
 
-        mock_user_stats.get_reaction_network_rolling.return_value = [
-            ("Alice", "Bob", 100),
-            ("Bob", "Alice", 80),
+        mock_user_stats.get_reaction_network_for_month.return_value = [
+            {"giver_username": "Alice", "receiver_username": "Bob", "reaction_count": 100},
+            {"giver_username": "Bob", "receiver_username": "Alice", "reaction_count": 80},
         ]
 
-        await dpytest.message("!connections 3")
+        await dpytest.message("!connections")
 
-        # Should call with correct rolling window
-        mock_user_stats.get_reaction_network_rolling.assert_called_once()
+        # Should call get_reaction_network_for_month (not rolling)
+        mock_user_stats.get_reaction_network_for_month.assert_called_once()
         response = dpytest.get_message()
         assert "Top 10 Mutual Relationships" in response.content
-
-    @pytest.mark.asyncio
-    async def test_connections_validates_months_minimum(self, bot_with_mocked_db):
-        """Test that !connections validates months >= 1."""
-        bot, mock_db, mock_user_stats, _ = bot_with_mocked_db
-
-        await dpytest.message("!connections 0")
-
-        assert dpytest.verify().message().content("Number of months must be at least 1.")
-
-    @pytest.mark.asyncio
-    async def test_connections_validates_months_maximum(self, bot_with_mocked_db):
-        """Test that !connections validates months <= 12."""
-        bot, mock_db, mock_user_stats, _ = bot_with_mocked_db
-
-        await dpytest.message("!connections 13")
-
-        assert dpytest.verify().message().content("Number of months must be at most 12.")
 
     @pytest.mark.asyncio
     async def test_connections_shows_affinity_scores(self, bot_with_mocked_db):
@@ -82,17 +65,30 @@ class TestConnectionsCommand:
         bot, mock_db, mock_user_stats, _ = bot_with_mocked_db
 
         # Set up data where we can calculate expected affinity
-        # Alice gives 50 to Bob out of 80 total (50/80 = 0.625)
-        # Bob gives 40 to Alice out of 40 total (40/40 = 1.0)
-        # Affinity = sqrt(0.625 * 1.0) = 0.791
-        mock_user_stats.get_reaction_network_rolling.return_value = [
-            ("Alice", "Bob", 50),
-            ("Alice", "Charlie", 30),
-            ("Bob", "Alice", 40),
+        mock_user_stats.get_reaction_network_for_month.return_value = [
+            {"giver_username": "Alice", "receiver_username": "Bob", "reaction_count": 50},
+            {"giver_username": "Alice", "receiver_username": "Charlie", "reaction_count": 30},
+            {"giver_username": "Bob", "receiver_username": "Alice", "reaction_count": 40},
         ]
 
         await dpytest.message("!connections")
 
         response = dpytest.get_message()
-        # Should show the affinity score
-        assert "<->" in response.content or "↔" in response.content
+        # Should show the affinity score with <-> notation
+        assert "<->" in response.content
+
+    @pytest.mark.asyncio
+    async def test_connections_handles_no_mutual_connections(self, bot_with_mocked_db):
+        """Test that !connections handles case with no bidirectional edges."""
+        bot, mock_db, mock_user_stats, _ = bot_with_mocked_db
+
+        # Only unidirectional reactions - no mutual connections
+        mock_user_stats.get_reaction_network_for_month.return_value = [
+            {"giver_username": "Alice", "receiver_username": "Bob", "reaction_count": 50},
+            {"giver_username": "Charlie", "receiver_username": "Dave", "reaction_count": 30},
+        ]
+
+        await dpytest.message("!connections")
+
+        response = dpytest.get_message()
+        assert "No mutual connections found for" in response.content

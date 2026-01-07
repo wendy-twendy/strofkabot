@@ -127,11 +127,11 @@ class UserStats:
         self.logger.debug(f"Fetched raw inflation records: {records[:3]}...")
         return records
 
-    async def get_gdp_data(self, limit: int = 24) -> list[dict]:
+    async def get_gdp_data(self, limit: int | None = 24) -> list[dict]:
         """Get total messages per month for GDP calculation.
 
         Args:
-            limit: Maximum number of months to return.
+            limit: Maximum number of months to return. If None, returns all data.
 
         Returns:
             List of dictionaries with year, month, and total_messages.
@@ -178,6 +178,31 @@ class UserStats:
         """
         self.logger.info(f"Fetching trade data for user {user_id} from {year}-{month:02d}")
         data = await self.db.fetch_trade_data(user_id, year, month, limit)
+        # Convert tuples to the expected format
+        return {
+            "exports": [(row[0], row[1]) for row in data["exports"]],
+            "imports": [(row[0], row[1]) for row in data["imports"]],
+            "total_given": data["total_given"],
+            "total_received": data["total_received"],
+            "trade_balance": data["trade_balance"],
+        }
+
+    async def get_reaction_trade_data_for_month(
+        self, user_id: int, year: int, month: int, limit: int = 5
+    ) -> dict:
+        """Get reaction trade data for a specific user for a single month.
+
+        Args:
+            user_id: The Discord user ID.
+            year: The year to query.
+            month: The month to query.
+            limit: Maximum number of top users to return.
+
+        Returns:
+            Dictionary with exports, imports, total_given, total_received, and trade_balance.
+        """
+        self.logger.info(f"Fetching trade data for user {user_id} for {year}-{month:02d}")
+        data = await self.db.fetch_trade_data_for_month(user_id, year, month, limit)
         # Convert tuples to the expected format
         return {
             "exports": [(row[0], row[1]) for row in data["exports"]],

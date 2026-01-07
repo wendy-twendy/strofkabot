@@ -8,6 +8,7 @@ from strofkabot.utils.data_processing import (
     fetch_hdi_data,
     fetch_inflation_data,
     get_reaction_trade_data,
+    get_reaction_trade_data_for_month,
     perform_kmeans_clustering,
     prepare_clustering_data,
 )
@@ -62,6 +63,7 @@ __all__ = [
     "fetch_gdp_data",
     "fetch_hdi_data",
     "get_reaction_trade_data",
+    "get_reaction_trade_data_for_month",
     "calculate_reaction_percentage",
     "prepare_clustering_data",
     "perform_kmeans_clustering",

@@ -294,3 +294,68 @@ class BackgroundTaskManager:
 
         self.last_username_update = current_time
         self.logger.info(f"Finished updating usernames at {current_time.isoformat()}.")
+
+    async def check_predictions(self) -> None:
+        """Check and post due predictions."""
+        if not self.guild:
+            self.logger.warning("Guild not set. Skipping prediction check.")
+            return
+
+        now = datetime.datetime.now(datetime.UTC)
+        today = now.date()
+        current_hour = now.hour
+
+        due_predictions = await self.db.get_due_predictions(today)
+
+        if not due_predictions:
+            return
+
+        self.logger.info(f"Found {len(due_predictions)} due prediction(s) to check.")
+
+        for prediction in due_predictions:
+            is_overdue = prediction.target_date < today
+            is_midday = 11 <= current_hour <= 13
+
+            # Post today's predictions only around midday (11:00-13:00 UTC)
+            # But always post overdue predictions (catch-up logic)
+            if is_overdue or is_midday:
+                try:
+                    await self._post_prediction(prediction)
+                    await self.db.mark_prediction_posted(prediction.id)
+                    self.logger.info(
+                        f"Posted prediction #{prediction.id} by {prediction.author_name}"
+                    )
+                except Exception:
+                    self.logger.exception(f"Error posting prediction #{prediction.id}")
+
+    async def _post_prediction(self, prediction) -> None:
+        """Post a prediction to its original channel."""
+        from strofkabot.discord_db import Prediction
+
+        if not isinstance(prediction, Prediction):
+            raise TypeError("Expected Prediction object")
+
+        channel = self.bot.get_channel(prediction.channel_id)
+        if not channel:
+            self.logger.warning(
+                f"Channel {prediction.channel_id} not found for prediction {prediction.id}"
+            )
+            return
+
+        # Build embed
+        embed = discord.Embed(
+            title="Prediction Day!",
+            description=prediction.prediction_text,
+            color=discord.Color.gold(),
+        )
+
+        # Try to get current user info for avatar
+        member = self.guild.get_member(prediction.author_id)
+        if member:
+            embed.set_author(name=member.display_name, icon_url=member.display_avatar.url)
+        else:
+            embed.set_author(name=prediction.author_name)
+
+        embed.set_footer(text=f"Predicted on {prediction.created_at.strftime('%B %d, %Y')}")
+
+        await channel.send(embed=embed)

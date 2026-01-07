@@ -11,6 +11,7 @@ PyYAML
 python-dotenv
 networkx
 adjustText
+dateparser
 
 # Testing
 pytest>=7.4.0
