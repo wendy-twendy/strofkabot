@@ -11,15 +11,16 @@ from matplotlib.colors import ListedColormap
 def create_monthly_inflation_plot(monthly_inflation: list[dict]) -> io.BytesIO:
     """Create a bar plot showing monthly reaction inflation."""
     plt.figure(figsize=(10, 6))
-    months = [record['month_year'] for record in monthly_inflation][::-1]
-    changes = [record['change_percentage'] for record in monthly_inflation][::-1]
-    averages = [record['average_rpm'] for record in monthly_inflation][::-1]
+    months = [record['month_year'] for record in monthly_inflation]
+    changes = [record['change_percentage'] for record in monthly_inflation]
+    averages = [record['average_rpm'] for record in monthly_inflation]
 
     ax = sns.barplot(x=months, y=changes, hue=months, palette="viridis", legend=False)
     plt.xticks(rotation=45, ha='right')
     plt.xlabel("Month")
     plt.ylabel("Inflation (%)")
     plt.title("Monthly Reaction Inflation (Last 12 Months)")
+    plt.grid(True, linestyle='--', alpha=0.7)
 
     for i, v in enumerate(averages):
         ax.text(i, changes[i], f'{v:.2f}', ha='center', va='bottom')
@@ -46,6 +47,7 @@ def create_yearly_inflation_plot(yearly_inflation: list[dict]) -> io.BytesIO:
     plt.xlabel("Year")
     plt.ylabel("YoY Inflation (%)")
     plt.title("Yearly Reaction Inflation")
+    plt.grid(True, linestyle='--', alpha=0.7)
 
     for i, v in enumerate(averages_yearly):
         ax.text(i, changes_yearly[i], f'{v:.2f}', ha='center', va='bottom')

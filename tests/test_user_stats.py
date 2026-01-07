@@ -3,6 +3,7 @@ Tests for the UserStats class.
 """
 import datetime
 
+from strofkabot.discord_db import Message
 from strofkabot.user_stats import UserStats
 
 
@@ -376,3 +377,59 @@ class TestReactionNetworkForMonth:
             for record in data:
                 assert record['giver_username'] in ['Alice', 'Bob', 'Charlie']
                 assert record['receiver_username'] in ['Alice', 'Bob', 'Charlie']
+
+
+class TestEdgeCases:
+    """Tests for edge cases and error handling."""
+
+    async def test_get_reaction_inflation_raw_empty(self, user_stats_db: UserStats):
+        """Test that get_reaction_inflation_raw returns empty list for empty database."""
+        data = await user_stats_db.get_reaction_inflation_raw(monthly=True, limit=12)
+        assert data == []
+
+        data = await user_stats_db.get_reaction_inflation_raw(monthly=False)
+        assert data == []
+
+    async def test_get_hdi_data_empty(self, user_stats_db: UserStats):
+        """Test that get_hdi_data returns empty list for empty database."""
+        data = await user_stats_db.get_hdi_data()
+        assert data == []
+
+    async def test_get_hdi_data_returns_correct_structure(
+        self, populated_user_stats: UserStats
+    ):
+        """Test that get_hdi_data returns the correct structure when data exists."""
+        # First add a quality message to have HDI data
+        # Note: Message and datetime are already imported at the top of the file
+
+        msg = Message(
+            id=999,
+            content="Test quality message",
+            timestamp=datetime.datetime(2024, 1, 15),
+            reaction_count=10,
+            author_id=12345
+        )
+        await populated_user_stats.db.add_messages([msg])
+
+        data = await populated_user_stats.get_hdi_data(limit=24)
+
+        assert isinstance(data, list)
+        if data:
+            record = data[0]
+            assert 'year' in record
+            assert 'month' in record
+            assert 'quality_count' in record
+            assert 'total_count' in record
+            assert 'hdi_ratio' in record
+
+    async def test_reset_stats_on_empty_database(self, user_stats_db: UserStats):
+        """Test that reset_stats doesn't error on empty database."""
+        # Should not raise any exception
+        await user_stats_db.reset_stats()
+
+        # Verify tables are still empty
+        async with user_stats_db.db.conn.execute(
+            "SELECT COUNT(*) FROM user_stats_monthly"
+        ) as cursor:
+            count = (await cursor.fetchone())[0]
+        assert count == 0

@@ -9,6 +9,7 @@ import pytest
 
 from strofkabot.utils import (
     adjust_month,
+    calculate_average_preference_share,
     calculate_monthly_inflation,
     calculate_reaction_percentage,
     calculate_yearly_inflation,
@@ -18,6 +19,7 @@ from strofkabot.utils import (
     fetch_inflation_data,
     get_member_names,
     get_non_bot_member_ids,
+    get_reaction_trade_data,
     get_reply_info,
     parse_rpm_args,
     perform_kmeans_clustering,
@@ -128,11 +130,11 @@ class TestCalculateMonthlyInflation:
             assert 'change_percentage' in record
             assert 'average_rpm' in record
 
-    def test_inflation_calculation_values(self, sample_monthly_data):
-        """Test specific inflation values."""
-        result = calculate_monthly_inflation(sample_monthly_data)
+    def test_inflation_calculation_values(self, sample_monthly_data_descending):
+        """Test specific inflation values with DESC input (as database provides)."""
+        result = calculate_monthly_inflation(sample_monthly_data_descending)
 
-        # From sample data:
+        # Function reverses DESC to ASC internally, then calculates:
         # Jan 2024: 2.0 (baseline)
         # Feb 2024: 2.3 -> (2.3 - 2.0) / 2.0 * 100 = 15%
         assert result[0]['change_percentage'] == pytest.approx(15.0, abs=0.1)
@@ -150,40 +152,35 @@ class TestCalculateMonthlyInflation:
 
     def test_handles_zero_previous(self):
         """Test handles zero previous value without division error."""
+        # DESC order (as database provides) - function will reverse internally
         data = [
-            {'year': 2024, 'month': 1, 'average_rpm': 0},
-            {'year': 2024, 'month': 2, 'average_rpm': 0.5}
+            {'year': 2024, 'month': 2, 'average_rpm': 0.5},
+            {'year': 2024, 'month': 1, 'average_rpm': 0}
         ]
         result = calculate_monthly_inflation(data)
-        # Should not raise error, returns 0 for change
+        # Should not raise error, returns 0 for change when previous is 0
         assert result[0]['change_percentage'] == 0
 
-    def test_descending_order_produces_negative_values(self, sample_monthly_data_descending):
-        """Test that descending order data produces wrong (negative) inflation values.
+    def test_descending_input_produces_correct_values(self, sample_monthly_data_descending):
+        """Test that DESC input (as database provides) produces correct positive inflation.
 
-        This documents the bug where the database returned data in descending order
-        (newest first), causing the inflation calculation to measure changes backwards
-        in time, inverting all signs.
-
-        The fix is to ensure data is returned in ascending order from the database.
+        The function internally reverses DESC to ASC before calculating, so
+        descending input now produces correct chronological inflation values.
         """
         result = calculate_monthly_inflation(sample_monthly_data_descending)
 
-        # With descending data [Mar, Feb, Jan], calculation computes:
-        # Feb: (Feb_RPM - Mar_RPM) / Mar_RPM = (2.3 - 2.5) / 2.5 = -8%
-        # But chronologically, Feb→Mar should be +8.7%
-        # This test documents the bug - inflation should be positive, but descending order inverts it
-        assert result[0]['change_percentage'] < 0, "Descending data produces inverted (negative) inflation"
-
-    def test_ascending_order_produces_correct_values(self, sample_monthly_data):
-        """Test that ascending order data produces correct positive inflation values."""
-        result = calculate_monthly_inflation(sample_monthly_data)
-
-        # With ascending data [Jan, Feb, Mar], calculation computes:
+        # Function reverses [Mar, Feb, Jan] to [Jan, Feb, Mar], then calculates:
         # Feb: (Feb_RPM - Jan_RPM) / Jan_RPM = (2.3 - 2.0) / 2.0 = +15%
-        # This is the correct chronological inflation
-        assert result[0]['change_percentage'] > 0, "Ascending data produces correct positive inflation"
+        assert result[0]['change_percentage'] > 0, "DESC input produces correct positive inflation"
         assert result[0]['change_percentage'] == pytest.approx(15.0, abs=0.1)
+
+    def test_output_order_matches_chronological(self, sample_monthly_data_descending):
+        """Test that output is in chronological order (oldest to newest)."""
+        result = calculate_monthly_inflation(sample_monthly_data_descending)
+
+        # Output should be in chronological order: Feb, Mar
+        assert result[0]['month_year'] == '2024-02'
+        assert result[1]['month_year'] == '2024-03'
 
 
 class TestCalculateYearlyInflation:
@@ -759,3 +756,284 @@ class TestFetchHdiData:
         result = await fetch_hdi_data(mock_user_stats)
 
         assert result == []
+
+
+class TestGetReactionTradeData:
+    """Tests for the get_reaction_trade_data function."""
+
+    @pytest.mark.asyncio
+    async def test_with_resolved_members(self):
+        """Test that guild members are resolved to display names."""
+        mock_user_stats = MagicMock()
+        mock_user_stats.get_reaction_trade_data = AsyncMock(return_value={
+            'exports': [(111, 10), (222, 5)],
+            'imports': [(333, 8), (444, 3)],
+            'total_given': 15,
+            'total_received': 11,
+            'trade_balance': -4
+        })
+
+        mock_member_111 = MagicMock()
+        mock_member_111.display_name = "Alice"
+        mock_member_222 = MagicMock()
+        mock_member_222.display_name = "Bob"
+        mock_member_333 = MagicMock()
+        mock_member_333.display_name = "Charlie"
+        mock_member_444 = MagicMock()
+        mock_member_444.display_name = "Diana"
+
+        mock_guild = MagicMock(spec=discord.Guild)
+        mock_guild.get_member.side_effect = lambda uid: {
+            111: mock_member_111,
+            222: mock_member_222,
+            333: mock_member_333,
+            444: mock_member_444
+        }.get(uid)
+
+        result = await get_reaction_trade_data(mock_user_stats, 12345, mock_guild)
+
+        assert result['exports'] == [("Alice", 10), ("Bob", 5)]
+        assert result['imports'] == [("Charlie", 8), ("Diana", 3)]
+        assert result['total_given'] == 15
+        assert result['total_received'] == 11
+        assert result['trade_balance'] == -4
+
+    @pytest.mark.asyncio
+    async def test_missing_members_fallback(self):
+        """Test that missing members fall back to 'User {id}' format."""
+        mock_user_stats = MagicMock()
+        mock_user_stats.get_reaction_trade_data = AsyncMock(return_value={
+            'exports': [(111, 10), (999, 5)],
+            'imports': [(888, 8)],
+            'total_given': 15,
+            'total_received': 8,
+            'trade_balance': -7
+        })
+
+        mock_member_111 = MagicMock()
+        mock_member_111.display_name = "Alice"
+
+        mock_guild = MagicMock(spec=discord.Guild)
+        mock_guild.get_member.side_effect = lambda uid: {
+            111: mock_member_111
+        }.get(uid)  # 999 and 888 not in guild
+
+        result = await get_reaction_trade_data(mock_user_stats, 12345, mock_guild)
+
+        assert result['exports'] == [("Alice", 10), ("User 999", 5)]
+        assert result['imports'] == [("User 888", 8)]
+
+    @pytest.mark.asyncio
+    async def test_empty_exports_imports(self):
+        """Test with no exports or imports."""
+        mock_user_stats = MagicMock()
+        mock_user_stats.get_reaction_trade_data = AsyncMock(return_value={
+            'exports': [],
+            'imports': [],
+            'total_given': 0,
+            'total_received': 0,
+            'trade_balance': 0
+        })
+
+        mock_guild = MagicMock(spec=discord.Guild)
+
+        result = await get_reaction_trade_data(mock_user_stats, 12345, mock_guild)
+
+        assert result['exports'] == []
+        assert result['imports'] == []
+        assert result['total_given'] == 0
+        assert result['total_received'] == 0
+        assert result['trade_balance'] == 0
+
+    @pytest.mark.asyncio
+    async def test_datetime_calculation(self):
+        """Test that one_year_ago is passed correctly to the DAL."""
+        import datetime
+
+        mock_user_stats = MagicMock()
+        mock_user_stats.get_reaction_trade_data = AsyncMock(return_value={
+            'exports': [],
+            'imports': [],
+            'total_given': 0,
+            'total_received': 0,
+            'trade_balance': 0
+        })
+
+        mock_guild = MagicMock(spec=discord.Guild)
+
+        await get_reaction_trade_data(mock_user_stats, 12345, mock_guild)
+
+        # Verify get_reaction_trade_data was called with correct args
+        call_args = mock_user_stats.get_reaction_trade_data.call_args
+        assert call_args[0][0] == 12345  # user_id
+        # Year and month should be approximately one year ago
+        now = datetime.datetime.now()
+        one_year_ago = now - datetime.timedelta(days=365)
+        assert call_args[0][1] == one_year_ago.year  # year
+        assert call_args[0][2] == one_year_ago.month  # month
+        assert call_args[1]['limit'] == 5
+
+    @pytest.mark.asyncio
+    async def test_returns_correct_structure(self):
+        """Test that the return dictionary has correct keys."""
+        mock_user_stats = MagicMock()
+        mock_user_stats.get_reaction_trade_data = AsyncMock(return_value={
+            'exports': [(111, 10)],
+            'imports': [(222, 5)],
+            'total_given': 10,
+            'total_received': 5,
+            'trade_balance': -5
+        })
+
+        mock_member = MagicMock()
+        mock_member.display_name = "TestUser"
+        mock_guild = MagicMock(spec=discord.Guild)
+        mock_guild.get_member.return_value = mock_member
+
+        result = await get_reaction_trade_data(mock_user_stats, 12345, mock_guild)
+
+        assert 'exports' in result
+        assert 'imports' in result
+        assert 'total_given' in result
+        assert 'total_received' in result
+        assert 'trade_balance' in result
+        assert isinstance(result['exports'], list)
+        assert isinstance(result['imports'], list)
+
+
+class TestCalculateAveragePreferenceShare:
+    """Tests for the calculate_average_preference_share function."""
+
+    def test_basic_calculation(self):
+        """Test APS with simple data where one user is clearly more liked."""
+        # 5 givers, each giving reactions to users B and C
+        rows = [
+            {'giver_username': 'G1', 'receiver_username': 'B', 'reaction_count': 8},
+            {'giver_username': 'G1', 'receiver_username': 'C', 'reaction_count': 2},
+            {'giver_username': 'G2', 'receiver_username': 'B', 'reaction_count': 7},
+            {'giver_username': 'G2', 'receiver_username': 'C', 'reaction_count': 3},
+            {'giver_username': 'G3', 'receiver_username': 'B', 'reaction_count': 6},
+            {'giver_username': 'G3', 'receiver_username': 'C', 'reaction_count': 4},
+            {'giver_username': 'G4', 'receiver_username': 'B', 'reaction_count': 9},
+            {'giver_username': 'G4', 'receiver_username': 'C', 'reaction_count': 1},
+            {'giver_username': 'G5', 'receiver_username': 'B', 'reaction_count': 5},
+            {'giver_username': 'G5', 'receiver_username': 'C', 'reaction_count': 5},
+        ]
+        result = calculate_average_preference_share(rows, min_unique_reactors=1)
+
+        # B should rank higher than C (B gets 80%, 70%, 60%, 90%, 50% = 70% avg share)
+        assert len(result) == 2
+        assert result[0][0] == 'B'
+        assert result[1][0] == 'C'
+        # B's score: (0.8 + 0.7 + 0.6 + 0.9 + 0.5) / 5 = 0.7
+        assert result[0][1] == pytest.approx(0.7, abs=0.01)
+
+    def test_excludes_self_reactions(self):
+        """Self-reactions should not count toward scores."""
+        rows = [
+            {'giver_username': 'A', 'receiver_username': 'A', 'reaction_count': 100},  # Self
+            {'giver_username': 'A', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'C', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'D', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'E', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'F', 'receiver_username': 'B', 'reaction_count': 10},
+        ]
+        result = calculate_average_preference_share(rows, min_unique_reactors=1)
+
+        # A should not be in results (only has self-reactions)
+        usernames = [user for user, _ in result]
+        assert 'A' not in usernames
+        assert 'B' in usernames
+
+    def test_min_unique_reactors_filter(self):
+        """Users with fewer than min_unique_reactors should be excluded."""
+        rows = [
+            # B gets reactions from 5 unique givers
+            {'giver_username': 'G1', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'G2', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'G3', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'G4', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'G5', 'receiver_username': 'B', 'reaction_count': 10},
+            # C gets reactions from only 3 unique givers
+            {'giver_username': 'G1', 'receiver_username': 'C', 'reaction_count': 10},
+            {'giver_username': 'G2', 'receiver_username': 'C', 'reaction_count': 10},
+            {'giver_username': 'G3', 'receiver_username': 'C', 'reaction_count': 10},
+        ]
+        result = calculate_average_preference_share(rows, min_unique_reactors=5)
+
+        # Only B should qualify (5 reactors), C should be excluded (only 3)
+        usernames = [user for user, _ in result]
+        assert 'B' in usernames
+        assert 'C' not in usernames
+
+    def test_normalizes_prolific_givers(self):
+        """A giver who gives 1000 reactions should not dominate scores."""
+        rows = [
+            # Prolific giver gives 1000 reactions, 900 to B
+            {'giver_username': 'Prolific', 'receiver_username': 'B', 'reaction_count': 900},
+            {'giver_username': 'Prolific', 'receiver_username': 'C', 'reaction_count': 100},
+            # Casual giver gives 10 reactions, 9 to C
+            {'giver_username': 'Casual', 'receiver_username': 'B', 'reaction_count': 1},
+            {'giver_username': 'Casual', 'receiver_username': 'C', 'reaction_count': 9},
+            # More givers to meet minimum
+            {'giver_username': 'G3', 'receiver_username': 'B', 'reaction_count': 5},
+            {'giver_username': 'G3', 'receiver_username': 'C', 'reaction_count': 5},
+            {'giver_username': 'G4', 'receiver_username': 'B', 'reaction_count': 5},
+            {'giver_username': 'G4', 'receiver_username': 'C', 'reaction_count': 5},
+            {'giver_username': 'G5', 'receiver_username': 'B', 'reaction_count': 5},
+            {'giver_username': 'G5', 'receiver_username': 'C', 'reaction_count': 5},
+        ]
+        result = calculate_average_preference_share(rows, min_unique_reactors=1)
+
+        # Prolific: B=90%, C=10%
+        # Casual: B=10%, C=90%
+        # G3, G4, G5: B=50%, C=50%
+        # B total: (0.9 + 0.1 + 0.5 + 0.5 + 0.5) / 5 = 0.5
+        # C total: (0.1 + 0.9 + 0.5 + 0.5 + 0.5) / 5 = 0.5
+        # Scores should be equal - prolific giver doesn't dominate
+        b_score = next(score for user, score in result if user == 'B')
+        c_score = next(score for user, score in result if user == 'C')
+        assert b_score == pytest.approx(c_score, abs=0.01)
+
+    def test_empty_data(self):
+        """Test with empty data returns empty list."""
+        result = calculate_average_preference_share([], min_unique_reactors=5)
+        assert result == []
+
+    def test_no_qualifying_users(self):
+        """Test when no users meet the minimum reactors threshold."""
+        rows = [
+            {'giver_username': 'G1', 'receiver_username': 'B', 'reaction_count': 10},
+            {'giver_username': 'G2', 'receiver_username': 'B', 'reaction_count': 10},
+        ]
+        # Require 5 unique reactors, but B only has 2
+        result = calculate_average_preference_share(rows, min_unique_reactors=5)
+        assert result == []
+
+    def test_sorted_by_score_descending(self):
+        """Test that results are sorted by score in descending order."""
+        rows = [
+            {'giver_username': 'G1', 'receiver_username': 'Low', 'reaction_count': 1},
+            {'giver_username': 'G1', 'receiver_username': 'Mid', 'reaction_count': 3},
+            {'giver_username': 'G1', 'receiver_username': 'High', 'reaction_count': 6},
+            {'giver_username': 'G2', 'receiver_username': 'Low', 'reaction_count': 1},
+            {'giver_username': 'G2', 'receiver_username': 'Mid', 'reaction_count': 3},
+            {'giver_username': 'G2', 'receiver_username': 'High', 'reaction_count': 6},
+            {'giver_username': 'G3', 'receiver_username': 'Low', 'reaction_count': 1},
+            {'giver_username': 'G3', 'receiver_username': 'Mid', 'reaction_count': 3},
+            {'giver_username': 'G3', 'receiver_username': 'High', 'reaction_count': 6},
+            {'giver_username': 'G4', 'receiver_username': 'Low', 'reaction_count': 1},
+            {'giver_username': 'G4', 'receiver_username': 'Mid', 'reaction_count': 3},
+            {'giver_username': 'G4', 'receiver_username': 'High', 'reaction_count': 6},
+            {'giver_username': 'G5', 'receiver_username': 'Low', 'reaction_count': 1},
+            {'giver_username': 'G5', 'receiver_username': 'Mid', 'reaction_count': 3},
+            {'giver_username': 'G5', 'receiver_username': 'High', 'reaction_count': 6},
+        ]
+        result = calculate_average_preference_share(rows, min_unique_reactors=1)
+
+        assert result[0][0] == 'High'
+        assert result[1][0] == 'Mid'
+        assert result[2][0] == 'Low'
+        # Verify scores are actually descending
+        scores = [score for _, score in result]
+        assert scores == sorted(scores, reverse=True)

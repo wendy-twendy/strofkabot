@@ -80,3 +80,66 @@ def test_message_with_multiple_exclusions(message_filter):
     Test that a message containing multiple exclusions (e.g., user tag, link, emoji) is considered invalid.
     """
     assert not message_filter.is_valid_message("@user1234 check http://example.com :smiley:")
+
+
+def test_empty_string(message_filter):
+    """
+    Test that an empty string is considered invalid.
+    """
+    assert not message_filter.is_valid_message("")
+
+
+def test_whitespace_only_message(message_filter):
+    """
+    Test that a whitespace-only message is considered invalid due to length.
+    """
+    assert not message_filter.is_valid_message("   ")
+    assert not message_filter.is_valid_message("\t\n\r")
+
+
+def test_unicode_characters(message_filter):
+    """
+    Test that unicode content without Discord emojis is valid.
+    """
+    assert message_filter.is_valid_message("This has unicode: кириллица текст")
+    assert message_filter.is_valid_message("Chinese characters: 这是一个测试消息")
+
+
+def test_is_link_direct(message_filter):
+    """
+    Test the is_link method directly.
+    """
+    assert message_filter.is_link("http://example.com")
+    assert message_filter.is_link("https://example.com")
+    assert message_filter.is_link("check this http://test.com out")
+    assert not message_filter.is_link("no link here")
+    assert not message_filter.is_link("htt://not-a-link")
+
+
+def test_is_emoji_direct(message_filter):
+    """
+    Test the is_emoji method directly for Discord custom emojis.
+    """
+    assert message_filter.is_emoji("<:smile:123456789>")
+    assert message_filter.is_emoji("<:GWqlabsBan:398950688555663360>")
+    assert message_filter.is_emoji("some text <:emoji:123> more text")
+    assert not message_filter.is_emoji(":smile:")  # Standard emoji syntax, not Discord custom
+    assert not message_filter.is_emoji("no emoji here")
+
+
+def test_is_tag_direct(message_filter):
+    """
+    Test the is_tag method directly for Discord mentions.
+    """
+    assert message_filter.is_tag("<@123456789>")
+    assert message_filter.is_tag("<@!416623828920172544>")
+    assert message_filter.is_tag("hey <@user> check this")
+    assert not message_filter.is_tag("@username")  # Not a Discord mention format
+    assert not message_filter.is_tag("no mention here")
+
+
+def test_channel_method_removed(message_filter):
+    """
+    Regression test: verify is_channel method was removed (had undefined channel_pattern).
+    """
+    assert not hasattr(message_filter, 'is_channel')

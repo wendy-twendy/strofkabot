@@ -24,7 +24,3 @@ class MessageFilter:
 
     def is_tag(self, content:str):
         return bool(self.tag_pattern.search(content))
-
-    def is_channel(self, content:str):
-        return bool(self.channel_pattern.search(content))
-

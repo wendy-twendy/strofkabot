@@ -1,10 +1,9 @@
 """Discord-specific utility functions."""
 
 import datetime
+from collections import defaultdict
 
 import discord
-import networkx as nx
-import pandas as pd
 
 from strofkabot.utils.date_utils import adjust_month
 
@@ -159,13 +158,56 @@ async def get_non_bot_member_ids(guild: discord.Guild) -> list[int]:
     return [member.id for member in guild.members if not member.bot]
 
 
+def calculate_average_preference_share(
+    rows: list[dict],
+    min_unique_reactors: int = 5
+) -> list[tuple[str, float]]:
+    """Calculate Average Preference Share scores for most-liked ranking.
+
+    For each giver, calculates what fraction of their reactions go to each receiver.
+    Then averages these shares across all givers to find who captures the most
+    community attention.
+
+    Args:
+        rows: List of dicts with giver_username, receiver_username, reaction_count
+        min_unique_reactors: Minimum unique reactors required to qualify for ranking
+
+    Returns:
+        List of (username, score) tuples sorted by score descending
+    """
+    # Step 1: Calculate total reactions given by each giver
+    giver_totals: dict[str, int] = defaultdict(int)
+    for row in rows:
+        giver_totals[row['giver_username']] += row['reaction_count']
+
+    # Step 2: Calculate preference shares and aggregate by receiver
+    receiver_shares: dict[str, list[float]] = defaultdict(list)
+    for row in rows:
+        giver = row['giver_username']
+        receiver = row['receiver_username']
+        if giver != receiver:  # Exclude self-reactions
+            share = row['reaction_count'] / giver_totals[giver]
+            receiver_shares[receiver].append(share)
+
+    # Step 3: Calculate APS for each receiver
+    num_givers = len(giver_totals)
+    scores: dict[str, float] = {}
+    for receiver, shares in receiver_shares.items():
+        unique_reactors = len(shares)
+        if unique_reactors >= min_unique_reactors:
+            scores[receiver] = sum(shares) / num_givers
+
+    return sorted(scores.items(), key=lambda x: x[1], reverse=True)
+
+
 async def send_most_liked_stats(
     ctx,
     year: int,
     month: int,
     month_offset: int,
     user_stats,
-    bot
+    bot,
+    show_all: bool = False
 ) -> None:
     """Generate and send most-liked users for a specific month."""
     adjusted_year, adjusted_month = adjust_month(year, month, month_offset)
@@ -184,42 +226,29 @@ async def send_most_liked_stats(
         await ctx.send(f"No reaction data available for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}.")
         return
 
-    df = pd.DataFrame(rows)
+    # Calculate Average Preference Share scores
+    ranked_users = calculate_average_preference_share(rows)
 
-    df['normalized_weight'] = df['reaction_count'] / 50
-
-    weight_threshold = df['normalized_weight'].quantile(0.80)
-    df_filtered = df[df['normalized_weight'] >= weight_threshold]
-
-    G = nx.Graph()
-    for _, row in df_filtered.iterrows():
-        if row['giver_username'] != row['receiver_username']:
-            G.add_edge(
-                row['giver_username'], row['receiver_username'],
-                weight=row['normalized_weight']
-            )
-
-    G.remove_nodes_from(list(nx.isolates(G)))
-
-    if len(G.nodes()) == 0:
-        await ctx.send("Not enough interaction data to calculate rankings.")
+    if not ranked_users:
+        await ctx.send("Not enough users with sufficient reactions to calculate rankings.")
         return
 
-    try:
-        centrality = nx.eigenvector_centrality(G, weight='weight')
-        top_users = sorted(centrality.items(), key=lambda x: x[1], reverse=True)[:5]
-    except nx.PowerIterationFailedConvergence:
-        await ctx.send("Could not calculate rankings due to insufficient data.")
-        return
+    # Select users to display
+    users_to_show = ranked_users if show_all else ranked_users[:5]
 
-    response = f"**Most Liked Users for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}:**\n```\n"
+    # Format response
+    all_suffix = " (All)" if show_all else ""
+    response = f"**Most Liked Users for {datetime.date(adjusted_year, adjusted_month, 1).strftime('%B %Y')}{all_suffix}:**\n```\n"
     response += f"{'User':<20} {'Score':>8}\n"
     response += "-" * 30 + "\n"
 
-    for _rank, (user, score) in enumerate(top_users, 1):
-        response += f"{user[:20]:<20} {score:>8.2f}\n"
+    for user, score in users_to_show:
+        # Display score as percentage
+        response += f"{user[:20]:<20} {score * 100:>7.2f}%\n"
 
-    response += "```"
+    response += "```\n"
+    response += "_Score = average share of each member's reactions you receive. "
+    response += "Higher = more community attention, normalized so active reactors don't dominate._"
 
     message = await ctx.send(response)
     await message.add_reaction("⬅️")
@@ -237,7 +266,7 @@ async def send_most_liked_stats(
             elif str(reaction.emoji) == "➡️":
                 new_offset += 1
             await message.delete()
-            await send_most_liked_stats(ctx, year, month, new_offset, user_stats, bot)
+            await send_most_liked_stats(ctx, year, month, new_offset, user_stats, bot, show_all)
             break
         except TimeoutError:
             break

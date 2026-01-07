@@ -13,6 +13,7 @@ from strofkabot.utils.data_processing import (
 )
 from strofkabot.utils.date_utils import adjust_month
 from strofkabot.utils.discord_helpers import (
+    calculate_average_preference_share,
     get_member_names,
     get_non_bot_member_ids,
     get_reply_info,
@@ -60,4 +61,5 @@ __all__ = [
     'get_member_names',
     'get_non_bot_member_ids',
     'send_most_liked_stats',
+    'calculate_average_preference_share',
 ]

@@ -167,3 +167,346 @@ class TestTimestampHandling:
 
         retrieved = await message_database.get_last_scanned_timestamp(channel_id)
         assert retrieved == ts2
+
+
+class TestUserStatsOperations:
+    """Tests for user statistics CRUD operations."""
+
+    async def test_upsert_user_stats_insert(self, message_database: Database):
+        """Test inserting new user stats."""
+        await message_database.upsert_user_stats(
+            author_id=12345, year=2024, month=1, reaction_count=5
+        )
+
+        async with message_database.conn.execute(
+            "SELECT total_messages, total_reactions FROM user_stats_monthly WHERE author_id = ?",
+            (12345,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == 1  # total_messages
+        assert row[1] == 5  # total_reactions
+
+    async def test_upsert_user_stats_update(self, message_database: Database):
+        """Test that upsert increments message count and adds reactions."""
+        await message_database.upsert_user_stats(12345, 2024, 1, 5)
+        await message_database.upsert_user_stats(12345, 2024, 1, 3)
+
+        async with message_database.conn.execute(
+            "SELECT total_messages, total_reactions FROM user_stats_monthly WHERE author_id = ?",
+            (12345,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == 2  # total_messages incremented
+        assert row[1] == 8  # total_reactions accumulated
+
+    async def test_batch_upsert_user_stats(self, message_database: Database):
+        """Test batch inserting/updating user stats."""
+        stats = [
+            (12345, 2024, 1, 5),
+            (12345, 2024, 1, 3),
+            (67890, 2024, 1, 10),
+        ]
+        await message_database.batch_upsert_user_stats(stats)
+
+        async with message_database.conn.execute(
+            "SELECT author_id, total_messages, total_reactions FROM user_stats_monthly ORDER BY author_id"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        assert len(rows) == 2
+        assert rows[0] == (12345, 2, 8)  # Two messages, 5+3 reactions
+        assert rows[1] == (67890, 1, 10)
+
+    async def test_upsert_user_mapping(self, message_database: Database):
+        """Test inserting and updating user mapping."""
+        await message_database.upsert_user_mapping(12345, "Alice")
+
+        async with message_database.conn.execute(
+            "SELECT username FROM user_mapping WHERE author_id = ?", (12345,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == "Alice"
+
+        # Update the name
+        await message_database.upsert_user_mapping(12345, "Alice_New")
+
+        async with message_database.conn.execute(
+            "SELECT username FROM user_mapping WHERE author_id = ?", (12345,)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == "Alice_New"
+
+    async def test_fetch_monthly_stats_with_data(self, message_database: Database):
+        """Test fetching monthly stats with user mapping JOIN."""
+        await message_database.upsert_user_mapping(12345, "Alice")
+        await message_database.upsert_user_mapping(67890, "Bob")
+        await message_database.upsert_user_stats(12345, 2024, 1, 10)
+        await message_database.upsert_user_stats(12345, 2024, 1, 10)
+        await message_database.upsert_user_stats(67890, 2024, 1, 5)
+
+        result = await message_database.fetch_monthly_stats(2024, 1)
+
+        assert len(result) == 2
+        # Results should be ordered by avg_reactions DESC
+        # Alice: 20 reactions / 2 messages = 10 avg
+        # Bob: 5 reactions / 1 message = 5 avg
+        assert result[0][1] == "Alice"  # username
+        assert result[0][4] == 10.0  # avg_reactions
+        assert result[1][1] == "Bob"
+
+    async def test_fetch_monthly_stats_empty(self, message_database: Database):
+        """Test fetching monthly stats for empty month returns empty list."""
+        result = await message_database.fetch_monthly_stats(2024, 12)
+        assert result == []
+
+    async def test_fetch_user_monthly_stats_exists(self, message_database: Database):
+        """Test fetching specific user's monthly stats."""
+        await message_database.upsert_user_stats(12345, 2024, 1, 10)
+        await message_database.upsert_user_stats(12345, 2024, 1, 10)
+
+        result = await message_database.fetch_user_monthly_stats(12345, 2024, 1)
+
+        assert result is not None
+        assert result[0] == 2  # total_messages
+        assert result[1] == 20  # total_reactions
+        assert result[2] == 10.0  # avg_reactions
+
+    async def test_fetch_user_monthly_stats_not_found(self, message_database: Database):
+        """Test fetching stats for non-existent user returns None."""
+        result = await message_database.fetch_user_monthly_stats(99999, 2024, 1)
+        assert result is None
+
+
+class TestReactionStatsOperations:
+    """Tests for reaction statistics operations."""
+
+    async def test_upsert_reaction_stats_insert(self, message_database: Database):
+        """Test inserting new reaction stats."""
+        await message_database.upsert_reaction_stats(
+            giver_id=12345, receiver_id=67890, year=2024, month=1
+        )
+
+        async with message_database.conn.execute(
+            "SELECT reaction_count FROM user_reactions_monthly WHERE giver_id = ? AND receiver_id = ?",
+            (12345, 67890)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == 1
+
+    async def test_upsert_reaction_stats_increment(self, message_database: Database):
+        """Test that upsert increments reaction count."""
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+
+        async with message_database.conn.execute(
+            "SELECT reaction_count FROM user_reactions_monthly WHERE giver_id = ? AND receiver_id = ?",
+            (12345, 67890)
+        ) as cursor:
+            row = await cursor.fetchone()
+
+        assert row[0] == 3
+
+    async def test_batch_upsert_reaction_stats(self, message_database: Database):
+        """Test batch inserting reaction stats."""
+        stats = [
+            (12345, 67890, 2024, 1),
+            (12345, 67890, 2024, 1),
+            (67890, 12345, 2024, 1),
+        ]
+        await message_database.batch_upsert_reaction_stats(stats)
+
+        async with message_database.conn.execute(
+            "SELECT giver_id, receiver_id, reaction_count FROM user_reactions_monthly ORDER BY giver_id, receiver_id"
+        ) as cursor:
+            rows = await cursor.fetchall()
+
+        assert len(rows) == 2
+        assert rows[0] == (12345, 67890, 2)  # Two reactions from 12345 to 67890
+        assert rows[1] == (67890, 12345, 1)
+
+    async def test_delete_all_user_stats(self, message_database: Database):
+        """Test deleting all user stats and reactions."""
+        await message_database.upsert_user_stats(12345, 2024, 1, 5)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+
+        await message_database.delete_all_user_stats()
+
+        async with message_database.conn.execute(
+            "SELECT COUNT(*) FROM user_stats_monthly"
+        ) as cursor:
+            stats_count = (await cursor.fetchone())[0]
+
+        async with message_database.conn.execute(
+            "SELECT COUNT(*) FROM user_reactions_monthly"
+        ) as cursor:
+            reactions_count = (await cursor.fetchone())[0]
+
+        assert stats_count == 0
+        assert reactions_count == 0
+
+
+class TestComplexQueries:
+    """Tests for complex query operations and edge cases."""
+
+    async def test_fetch_inflation_data_monthly(self, message_database: Database):
+        """Test fetching monthly inflation data."""
+        # Set up data for two months
+        await message_database.upsert_user_stats(12345, 2024, 1, 10)
+        await message_database.upsert_user_stats(12345, 2024, 2, 15)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 2)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 2)
+
+        result = await message_database.fetch_inflation_data(monthly=True, limit=12)
+
+        assert len(result) == 2
+        # Results ordered by year DESC, month DESC
+        assert result[0][0] == 2024  # year
+        assert result[0][1] == 2  # month
+        assert result[0][2] == 2  # total_reactions for month 2
+        assert result[1][1] == 1  # month 1
+
+    async def test_fetch_inflation_data_yearly(self, message_database: Database):
+        """Test fetching yearly inflation data."""
+        await message_database.upsert_user_stats(12345, 2023, 6, 10)
+        await message_database.upsert_user_stats(12345, 2024, 6, 15)
+
+        result = await message_database.fetch_inflation_data(monthly=False)
+
+        assert len(result) == 2
+        # Results ordered by year ASC for yearly
+        assert result[0][0] == 2023
+        assert result[1][0] == 2024
+
+    async def test_fetch_inflation_data_empty(self, message_database: Database):
+        """Test fetching inflation data from empty database."""
+        result = await message_database.fetch_inflation_data(monthly=True, limit=12)
+        assert result == []
+
+    async def test_fetch_gdp_data(self, message_database: Database):
+        """Test fetching GDP (total messages) data."""
+        await message_database.upsert_user_stats(12345, 2024, 1, 5)
+        await message_database.upsert_user_stats(12345, 2024, 1, 5)
+        await message_database.upsert_user_stats(67890, 2024, 1, 3)
+        await message_database.upsert_user_stats(12345, 2024, 2, 10)
+
+        result = await message_database.fetch_gdp_data(limit=24)
+
+        assert len(result) == 2
+        # Ordered by year DESC, month DESC
+        assert result[0] == (2024, 2, 1)  # 1 message in Feb
+        assert result[1] == (2024, 1, 3)  # 3 messages in Jan
+
+    async def test_fetch_gdp_data_respects_limit(self, message_database: Database):
+        """Test that fetch_gdp_data respects the limit parameter."""
+        for month in range(1, 13):
+            await message_database.upsert_user_stats(12345, 2024, month, 5)
+
+        result = await message_database.fetch_gdp_data(limit=3)
+
+        assert len(result) == 3
+
+    async def test_fetch_hdi_data(self, message_database: Database):
+        """Test fetching HDI (quality ratio) data."""
+        # Add quality messages to messages table
+        msg = Message(
+            id=1, content="Quality message", timestamp=datetime.datetime(2024, 1, 15),
+            reaction_count=10, author_id=12345
+        )
+        await message_database.add_messages([msg])
+
+        # Add user stats (total messages)
+        await message_database.upsert_user_stats(12345, 2024, 1, 5)
+        await message_database.upsert_user_stats(12345, 2024, 1, 5)
+
+        result = await message_database.fetch_hdi_data(limit=24)
+
+        assert len(result) == 1
+        assert result[0][0] == '2024'  # year (string from strftime)
+        assert result[0][1] == '01'  # month (string from strftime)
+        assert result[0][2] == 1  # quality_count
+        assert result[0][3] == 2  # total_count
+        assert result[0][4] == 0.5  # hdi_ratio
+
+    async def test_fetch_hdi_data_division_by_zero(self, message_database: Database):
+        """Test that HDI handles division by zero with NULLIF."""
+        # Add a quality message but no user stats
+        msg = Message(
+            id=1, content="Quality message", timestamp=datetime.datetime(2024, 1, 15),
+            reaction_count=10, author_id=12345
+        )
+        await message_database.add_messages([msg])
+
+        # Query should not crash due to division by zero
+        result = await message_database.fetch_hdi_data(limit=24)
+
+        # The JOIN requires matching month in both tables, so with no user_stats
+        # for that month, the result should be empty (not a division error)
+        assert result == []
+
+    async def test_fetch_trade_data(self, message_database: Database):
+        """Test fetching trade balance data for a user."""
+        # User 12345 gives reactions
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 11111, 2024, 1)
+
+        # User 12345 receives reactions
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
+        await message_database.upsert_reaction_stats(67890, 12345, 2024, 1)
+        await message_database.upsert_reaction_stats(11111, 12345, 2024, 1)
+
+        result = await message_database.fetch_trade_data(12345, 2024, 1, limit=5)
+
+        assert result['total_given'] == 3
+        assert result['total_received'] == 5
+        assert result['trade_balance'] == 2  # received - given
+
+        # Check exports (who user gave reactions to)
+        assert len(result['exports']) == 2
+        assert result['exports'][0][0] == 67890  # top export partner
+        assert result['exports'][0][1] == 2  # gave 2 reactions
+
+    async def test_fetch_trade_data_no_activity(self, message_database: Database):
+        """Test fetching trade data for user with no reactions."""
+        result = await message_database.fetch_trade_data(99999, 2024, 1, limit=5)
+
+        assert result['total_given'] == 0
+        assert result['total_received'] == 0
+        assert result['trade_balance'] == 0
+        assert result['exports'] == []
+        assert result['imports'] == []
+
+    async def test_fetch_reaction_network(self, message_database: Database):
+        """Test fetching reaction network for most-liked calculation."""
+        # Set up user mappings
+        await message_database.upsert_user_mapping(12345, "Alice")
+        await message_database.upsert_user_mapping(67890, "Bob")
+
+        # Set up user stats for the month
+        await message_database.upsert_user_stats(12345, 2024, 1, 10)
+        await message_database.upsert_user_stats(67890, 2024, 1, 5)
+
+        # Set up reactions
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+        await message_database.upsert_reaction_stats(12345, 67890, 2024, 1)
+
+        result = await message_database.fetch_reaction_network(2024, 1)
+
+        assert len(result) == 1
+        assert result[0][0] == "Alice"  # giver_username
+        assert result[0][1] == "Bob"  # receiver_username
+        assert result[0][2] == 2  # reaction_count
+
+    async def test_fetch_reaction_network_empty_month(self, message_database: Database):
+        """Test fetching reaction network for empty month returns empty list."""
+        result = await message_database.fetch_reaction_network(2024, 12)
+        assert result == []

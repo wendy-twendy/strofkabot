@@ -235,15 +235,16 @@ class LlumiBot(commands.Cog):
             self.logger.exception("Error generating HDI plot")
             await ctx.send("An error occurred while generating the HDI plot.")
 
-    @commands.command(name='most-liked', help='Shows the most influential users')
-    async def show_most_liked(self, ctx: commands.Context):
+    @commands.command(name='most-liked', help='Shows the most liked users. Use --all to show all users.')
+    async def show_most_liked(self, ctx: commands.Context, *, args: str = ""):
         try:
+            show_all = "--all" in args.lower()
             current_date = datetime.datetime.now(datetime.UTC)
             await send_most_liked_stats(
                 ctx, current_date.year, current_date.month, 0,
-                self.user_stats, self.bot
+                self.user_stats, self.bot, show_all
             )
-            self.logger.info(f"Most-liked stats requested by {ctx.author}")
+            self.logger.info(f"Most-liked stats requested by {ctx.author} (show_all={show_all})")
         except Exception:
             self.logger.exception("Error in most-liked command")
             await ctx.send("An error occurred while calculating most-liked users.")
@@ -327,13 +328,9 @@ async def main():
         asyncio.create_task(shutdown(sig))
 
     try:
-        if os.name != 'nt':
-            loop = asyncio.get_running_loop()
-            for sig in (signal.SIGINT, signal.SIGTERM):
-                loop.add_signal_handler(sig, lambda s=sig: signal_handler(s, None))
-        else:
-            signal.signal(signal.SIGINT, signal_handler)
-            signal.signal(signal.SIGTERM, signal_handler)
+        loop = asyncio.get_running_loop()
+        for sig in (signal.SIGINT, signal.SIGTERM):
+            loop.add_signal_handler(sig, lambda s=sig: signal_handler(s, None))
 
         await bot.start(token)
     except KeyboardInterrupt:

@@ -26,6 +26,10 @@ python3 -m venv .venv
 .venv/bin/ruff check .
 ```
 
+## Development Workflow
+
+Follow TDD: write tests first, verify they fail, then write code and confirm tests pass.
+
 ## Container (Production)
 
 The bot runs as a Podman container via systemd Quadlet. See `PODMAN.md` for details.

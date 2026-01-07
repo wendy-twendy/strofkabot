@@ -20,7 +20,7 @@ def calculate_monthly_inflation(monthly_data: list[dict]) -> list[dict]:
     """Calculate month-over-month inflation percentages."""
     monthly_inflation = []
     prev_avg = None
-    for record in monthly_data:
+    for record in reversed(monthly_data):
         if prev_avg is not None:
             change = ((record['average_rpm'] - prev_avg) / prev_avg) * 100 if prev_avg != 0 else 0
             monthly_inflation.append({
