@@ -590,6 +590,60 @@ class Database:
         async with self.conn.execute(query, (start_year, start_year, start_month)) as cursor:
             return await cursor.fetchall()
 
+    async def fetch_user_reaction_distribution_rolling(
+        self, user_id: int, start_year: int, start_month: int
+    ) -> dict:
+        """Fetch complete reaction distribution for a user over a rolling window.
+
+        Args:
+            user_id: The Discord user ID.
+            start_year: Start year for the rolling window.
+            start_month: Start month for the rolling window.
+
+        Returns:
+            Dictionary with:
+            - outgoing: list of (receiver_id, total_count) tuples
+            - incoming: list of (giver_id, total_count) tuples
+        """
+        await self.ensure_connection()
+
+        # Get all outgoing reactions (where user is the giver)
+        outgoing_query = """
+            SELECT receiver_id, SUM(reaction_count) as total_count
+            FROM user_reactions_monthly
+            WHERE giver_id = ?
+              AND ((year > ?) OR (year = ? AND month >= ?))
+              AND giver_id != receiver_id
+            GROUP BY receiver_id
+            ORDER BY total_count DESC
+        """
+
+        # Get all incoming reactions (where user is the receiver)
+        incoming_query = """
+            SELECT giver_id, SUM(reaction_count) as total_count
+            FROM user_reactions_monthly
+            WHERE receiver_id = ?
+              AND ((year > ?) OR (year = ? AND month >= ?))
+              AND giver_id != receiver_id
+            GROUP BY giver_id
+            ORDER BY total_count DESC
+        """
+
+        async with self.conn.execute(
+            outgoing_query, (user_id, start_year, start_year, start_month)
+        ) as cursor:
+            outgoing = await cursor.fetchall()
+
+        async with self.conn.execute(
+            incoming_query, (user_id, start_year, start_year, start_month)
+        ) as cursor:
+            incoming = await cursor.fetchall()
+
+        return {
+            "outgoing": list(outgoing),
+            "incoming": list(incoming),
+        }
+
     # =========================================================================
     # Attachment Operations
     # =========================================================================

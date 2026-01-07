@@ -1,6 +1,7 @@
 """Data fetching, calculation, and analysis functions."""
 
 import datetime
+import math
 from typing import Any
 
 import discord
@@ -210,3 +211,126 @@ async def fetch_hourly_activity_data(
         activity_matrix[display_day, hour] = count
 
     return activity_matrix
+
+
+def calculate_normalized_entropy(distribution: list[int]) -> float:
+    """Calculate normalized entropy (evenness) for a distribution.
+
+    Args:
+        distribution: List of counts (e.g., reaction counts per person).
+
+    Returns:
+        Score from 0 to 1:
+        - 0 = Maximum concentration (all to one person, or no data)
+        - 1 = Maximum diversity (evenly distributed)
+    """
+    total = sum(distribution)
+    if total == 0 or len(distribution) <= 1:
+        return 0.0
+
+    # Calculate Shannon entropy
+    entropy = 0.0
+    for count in distribution:
+        if count > 0:
+            p = count / total
+            entropy -= p * math.log2(p)
+
+    # Normalize by maximum possible entropy (uniform distribution)
+    max_entropy = math.log2(len(distribution))
+
+    return entropy / max_entropy if max_entropy > 0 else 0.0
+
+
+def calculate_top_n_concentration(distribution: list[int], n: int = 3) -> float:
+    """Calculate what percentage of total goes to top N recipients.
+
+    Args:
+        distribution: List of counts (e.g., reaction counts per person).
+        n: Number of top recipients to consider.
+
+    Returns:
+        Percentage (0-100) of total that goes to top N.
+    """
+    total = sum(distribution)
+    if total == 0:
+        return 0.0
+
+    sorted_dist = sorted(distribution, reverse=True)
+    top_n_total = sum(sorted_dist[:n])
+
+    return (top_n_total / total) * 100
+
+
+def calculate_echo_chamber_metrics(
+    outgoing: list[tuple[int, int]], incoming: list[tuple[int, int]]
+) -> dict[str, Any]:
+    """Calculate comprehensive echo chamber metrics.
+
+    Args:
+        outgoing: List of (user_id, reaction_count) for reactions given.
+        incoming: List of (user_id, reaction_count) for reactions received.
+
+    Returns:
+        Dictionary with:
+        - outgoing_top3_pct: % of reactions given to top 3
+        - incoming_top3_pct: % of reactions received from top 3
+        - outgoing_diversity: Normalized entropy of giving pattern (0-1)
+        - incoming_diversity: Normalized entropy of receiving pattern (0-1)
+        - echo_chamber_index: Combined score (0-100, higher = more bubble)
+        - interpretation: Human-readable interpretation
+        - outgoing_top: Top 3 outgoing (user_id, count, percentage)
+        - incoming_top: Top 3 incoming (user_id, count, percentage)
+    """
+    # Extract just the counts for entropy/concentration calculations
+    outgoing_counts = [count for _, count in outgoing]
+    incoming_counts = [count for _, count in incoming]
+
+    # Calculate metrics
+    outgoing_top3_pct = calculate_top_n_concentration(outgoing_counts, n=3)
+    incoming_top3_pct = calculate_top_n_concentration(incoming_counts, n=3)
+    outgoing_diversity = calculate_normalized_entropy(outgoing_counts)
+    incoming_diversity = calculate_normalized_entropy(incoming_counts)
+
+    # Calculate echo chamber index (0-100, higher = more bubble)
+    # Based on inverse of diversity and high concentration
+    if not outgoing_counts and not incoming_counts:
+        # No data = maximum echo chamber (can't engage with anyone)
+        echo_chamber_index = 100
+    else:
+        # Average of (1 - diversity) scores, scaled to 0-100
+        avg_concentration = ((1 - outgoing_diversity) + (1 - incoming_diversity)) / 2
+        echo_chamber_index = round(avg_concentration * 100)
+
+    # Generate interpretation
+    if echo_chamber_index <= 25:
+        interpretation = "Very diverse - you engage broadly"
+    elif echo_chamber_index <= 50:
+        interpretation = "Moderate - healthy mix of close ties and broader engagement"
+    elif echo_chamber_index <= 75:
+        interpretation = "Concentrated - you have a clear inner circle"
+    else:
+        interpretation = "Echo chamber - most interactions within a small group"
+
+    # Calculate top partners with percentages
+    outgoing_total = sum(outgoing_counts) if outgoing_counts else 0
+    incoming_total = sum(incoming_counts) if incoming_counts else 0
+
+    outgoing_top = [
+        (user_id, count, (count / outgoing_total * 100) if outgoing_total > 0 else 0)
+        for user_id, count in sorted(outgoing, key=lambda x: x[1], reverse=True)[:3]
+    ]
+    incoming_top = [
+        (user_id, count, (count / incoming_total * 100) if incoming_total > 0 else 0)
+        for user_id, count in sorted(incoming, key=lambda x: x[1], reverse=True)[:3]
+    ]
+
+    return {
+        "outgoing_top3_pct": outgoing_top3_pct,
+        "incoming_top3_pct": incoming_top3_pct,
+        "outgoing_diversity": outgoing_diversity,
+        "incoming_diversity": incoming_diversity,
+        "echo_chamber_index": echo_chamber_index,
+        "interpretation": interpretation,
+        "outgoing_top": outgoing_top,
+        "incoming_top": incoming_top,
+    }

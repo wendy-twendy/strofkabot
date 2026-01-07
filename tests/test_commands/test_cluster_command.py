@@ -15,7 +15,9 @@ class TestClusterCommand:
         mock_user_stats.get_reaction_network_rolling.return_value = []
 
         await dpytest.message("!cluster")
-        assert dpytest.verify().message().content("No reaction data available for this period.")
+        msg = dpytest.get_message()
+        assert msg is not None
+        assert "No reaction data available" in msg.content
 
     @pytest.mark.asyncio
     async def test_cluster_validates_months_min(self, bot_with_mocked_db):

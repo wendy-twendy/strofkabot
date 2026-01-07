@@ -30,6 +30,7 @@ from strofkabot.utils import (
     adjust_month,
     build_affinity_graph,
     build_reaction_graph,
+    calculate_echo_chamber_metrics,
     calculate_monthly_inflation,
     calculate_yearly_inflation,
     compute_all_affinities,
@@ -440,7 +441,7 @@ class LlumiBot(commands.Cog):
     @commands.command(
         name="riekt-graph", help="Shows reaction network graph. Usage: !riekt-graph [months]"
     )
-    async def show_riekt_graph(self, ctx: commands.Context, months: int = 1):
+    async def show_riekt_graph(self, ctx: commands.Context, months: int = 3):
         try:
             self.logger.info(f"Generating riekt graph for {months} month(s)")
 
@@ -468,30 +469,37 @@ class LlumiBot(commands.Cog):
             directed_graph = build_reaction_graph(reaction_data)
             affinities = compute_all_affinities(directed_graph)
 
-            # Build affinity graph with threshold
-            min_affinity_threshold = 0.03
+            if not affinities:
+                await ctx.send("Not enough mutual connections to build a graph.")
+                return
+
+            # Calculate top 25% threshold (75th percentile)
+            from statistics import quantiles
+
+            affinity_values = [a[2] for a in affinities]
+            _, _, q3 = quantiles(affinity_values, n=4)
+
+            # Build affinity graph with top 25% threshold
             affinity_graph = build_affinity_graph(
                 directed_graph,
                 affinities,
-                min_affinity=min_affinity_threshold,
+                min_affinity=q3,
                 remove_isolated=True,
             )
 
-            # Find isolated nodes
-            all_nodes = set(directed_graph.nodes())
-            connected_nodes = set(affinity_graph.nodes())
-            isolated_nodes = sorted(all_nodes - connected_nodes)
+            # Keep only the largest connected component
+            if affinity_graph.number_of_nodes() > 0:
+                import networkx as nx
+
+                components = list(nx.connected_components(affinity_graph))
+                if len(components) > 1:
+                    largest_component = max(components, key=len)
+                    affinity_graph = affinity_graph.subgraph(largest_component).copy()
 
             # Detect communities and compute layout
             communities = detect_communities(directed_graph)
             activity = compute_node_activity(directed_graph)
-            positions = compute_community_layout(
-                affinity_graph, communities, isolated_nodes=isolated_nodes
-            )
-
-            # Add isolated nodes back to graph for drawing
-            for node in isolated_nodes:
-                affinity_graph.add_node(node)
+            positions = compute_community_layout(affinity_graph, communities)
 
             # Generate plot
             period_str = format_period_string(start_year, start_month, months)
@@ -592,20 +600,29 @@ class LlumiBot(commands.Cog):
 
     @commands.command(name="cluster", help="Shows social clusters. Usage: !cluster [months]")
     async def show_clusters(self, ctx: commands.Context, months: int = 1):
-        """Show social clusters using Louvain community detection."""
+        """Show social clusters using Louvain community detection with navigation."""
+        # Validate months parameter
+        if months < 1:
+            await ctx.send("Number of months must be at least 1.")
+            return
+        if months > 12:
+            await ctx.send("Number of months must be at most 12.")
+            return
+        await self._send_clusters(ctx, months=months, month_offset=0)
+
+    async def _send_clusters(self, ctx: commands.Context, months: int, month_offset: int):
+        """Send clusters message with navigation reactions."""
         try:
-            self.logger.info(f"Generating clusters for {months} month(s)")
+            self.logger.info(
+                f"Generating clusters for {months} month(s) with offset {month_offset}"
+            )
 
-            # Validate months parameter
-            if months < 1:
-                await ctx.send("Number of months must be at least 1.")
-                return
-            if months > 12:
-                await ctx.send("Number of months must be at most 12.")
-                return
-
-            # Calculate rolling window start
-            start_year, start_month = get_rolling_start_month(months)
+            # Calculate rolling window: start from (current - 1 + offset) and go back months
+            now = datetime.datetime.now(datetime.UTC)
+            # End month is previous month + offset
+            end_year, end_month = adjust_month(now.year, now.month, -1 + month_offset)
+            # Start month is end month - (months - 1)
+            start_year, start_month = adjust_month(end_year, end_month, -(months - 1))
 
             # Fetch data
             reaction_data = await self.user_stats.get_reaction_network_rolling(
@@ -613,7 +630,8 @@ class LlumiBot(commands.Cog):
             )
 
             if not reaction_data:
-                await ctx.send("No reaction data available for this period.")
+                period_str = format_period_string(start_year, start_month, months)
+                await ctx.send(f"No reaction data available for {period_str}.")
                 return
 
             # Build graph
@@ -623,7 +641,8 @@ class LlumiBot(commands.Cog):
             communities = detect_communities(directed_graph, resolution=1.5)
 
             if not communities:
-                await ctx.send("No communities detected for this period.")
+                period_str = format_period_string(start_year, start_month, months)
+                await ctx.send(f"No communities detected for {period_str}.")
                 return
 
             # Group members by community
@@ -649,8 +668,36 @@ class LlumiBot(commands.Cog):
 
             response += "```"
 
-            await ctx.send(response)
+            # Send message and add navigation reactions
+            message = await ctx.send(response)
+            await message.add_reaction("⬅️")
+            await message.add_reaction("➡️")
+
             self.logger.info("Clusters sent successfully")
+
+            # Wait for navigation reactions
+            def check(reaction, user):
+                return (
+                    reaction.message.id == message.id
+                    and str(reaction.emoji) in ["⬅️", "➡️"]
+                    and not user.bot
+                )
+
+            while True:
+                try:
+                    reaction, user = await self.bot.wait_for(
+                        "reaction_add", timeout=60.0, check=check
+                    )
+                    new_offset = month_offset
+                    if str(reaction.emoji) == "⬅️":
+                        new_offset -= 1
+                    elif str(reaction.emoji) == "➡️":
+                        new_offset += 1
+                    await message.delete()
+                    await self._send_clusters(ctx, months, new_offset)
+                    break
+                except TimeoutError:
+                    break
         except Exception:
             self.logger.exception("Error generating clusters")
             await ctx.send("An error occurred while generating clusters.")
@@ -928,6 +975,133 @@ class LlumiBot(commands.Cog):
         except Exception:
             self.logger.exception("Error generating activity heatmap")
             await ctx.send("An error occurred while generating the heatmap.")
+
+    @commands.command(
+        name="echo-chamber",
+        aliases=["ec", "bubble"],
+        help="Shows if you're in a reaction echo chamber. Usage: !echo-chamber [@user]",
+    )
+    async def show_echo_chamber(self, ctx: commands.Context, member: discord.Member = None):
+        """Display echo chamber analysis for a user (rolling 3 months)."""
+        try:
+            target_user = member or ctx.author
+
+            # Calculate rolling 3-month window
+            now = datetime.datetime.now(datetime.UTC)
+            # Go back 3 months from current month
+            start_year, start_month = adjust_month(now.year, now.month, -3)
+
+            self.logger.info(
+                f"Generating echo chamber analysis for user {target_user.id} "
+                f"from {start_year}-{start_month:02d}"
+            )
+
+            # Fetch data
+            data = await self.user_stats.get_echo_chamber_data(
+                target_user.id, start_year, start_month
+            )
+
+            # Check if there's any data
+            if not data["outgoing"] and not data["incoming"]:
+                await ctx.send(
+                    f"No reaction data found for {target_user.display_name} in the last 3 months."
+                )
+                return
+
+            # Calculate metrics
+            metrics = calculate_echo_chamber_metrics(data["outgoing"], data["incoming"])
+
+            # Resolve usernames for top partners
+            async def resolve_name(user_id: int) -> str:
+                member = self.guild.get_member(user_id)
+                if member:
+                    return member.display_name
+                # Try database lookup
+                username = await self.db.get_username_by_id(user_id)
+                return username or f"User {user_id}"
+
+            # Build response
+            period_str = format_period_string(start_year, start_month, 3)
+
+            response = f"**Echo Chamber Analysis for {target_user.display_name}**\n"
+            response += f"*{period_str}*\n```\n"
+
+            # Outgoing section
+            response += "Outgoing Reactions (Given):\n"
+            if data["outgoing"]:
+                response += (
+                    f"  Top 3 recipients: {metrics['outgoing_top3_pct']:.1f}% of all reactions\n"
+                )
+                response += f"  Diversity Score: {metrics['outgoing_diversity']:.2f}/1.00"
+                diversity_label = self._get_diversity_label(metrics["outgoing_diversity"])
+                response += f" ({diversity_label})\n"
+                response += "  Your top targets: "
+                top_names = []
+                for user_id, _count, pct in metrics["outgoing_top"]:
+                    name = await resolve_name(user_id)
+                    top_names.append(f"{name} ({pct:.0f}%)")
+                response += ", ".join(top_names) + "\n"
+            else:
+                response += "  No reactions given\n"
+
+            response += "\n"
+
+            # Incoming section
+            response += "Incoming Reactions (Received):\n"
+            if data["incoming"]:
+                response += (
+                    f"  Top 3 givers: {metrics['incoming_top3_pct']:.1f}% of all reactions\n"
+                )
+                response += f"  Diversity Score: {metrics['incoming_diversity']:.2f}/1.00"
+                diversity_label = self._get_diversity_label(metrics["incoming_diversity"])
+                response += f" ({diversity_label})\n"
+                response += "  Your top fans: "
+                top_names = []
+                for user_id, _count, pct in metrics["incoming_top"]:
+                    name = await resolve_name(user_id)
+                    top_names.append(f"{name} ({pct:.0f}%)")
+                response += ", ".join(top_names) + "\n"
+            else:
+                response += "  No reactions received\n"
+
+            response += "\n"
+
+            # Echo Chamber Index
+            response += f"Echo Chamber Index: {metrics['echo_chamber_index']}/100"
+            index_label = self._get_index_label(metrics["echo_chamber_index"])
+            response += f" ({index_label})\n"
+            response += metrics["interpretation"]
+
+            response += "```"
+
+            await ctx.send(response)
+            self.logger.info(f"Echo chamber analysis sent for user {target_user.id}")
+
+        except Exception:
+            self.logger.exception("Error generating echo chamber analysis")
+            await ctx.send("An error occurred while generating the echo chamber analysis.")
+
+    def _get_diversity_label(self, score: float) -> str:
+        """Get human-readable label for diversity score."""
+        if score >= 0.75:
+            return "High"
+        elif score >= 0.5:
+            return "Moderate"
+        elif score >= 0.25:
+            return "Low"
+        else:
+            return "Very Low"
+
+    def _get_index_label(self, index: int) -> str:
+        """Get human-readable label for echo chamber index."""
+        if index <= 25:
+            return "Very Diverse"
+        elif index <= 50:
+            return "Moderate"
+        elif index <= 75:
+            return "Concentrated"
+        else:
+            return "High"
 
 
 def setup_logging(log_level: str) -> logging.Logger:

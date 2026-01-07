@@ -1,8 +1,11 @@
 """Utility functions for the Strofkabot Discord bot."""
 
 from strofkabot.utils.data_processing import (
+    calculate_echo_chamber_metrics,
     calculate_monthly_inflation,
+    calculate_normalized_entropy,
     calculate_reaction_percentage,
+    calculate_top_n_concentration,
     calculate_yearly_inflation,
     fetch_gdp_data,
     fetch_hdi_data,
@@ -71,6 +74,9 @@ __all__ = [
     "calculate_reaction_percentage",
     "prepare_clustering_data",
     "perform_kmeans_clustering",
+    "calculate_normalized_entropy",
+    "calculate_top_n_concentration",
+    "calculate_echo_chamber_metrics",
     # Discord helpers
     "parse_rpm_args",
     "send_leaderboard",

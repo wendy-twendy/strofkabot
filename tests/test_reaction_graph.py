@@ -321,26 +321,26 @@ class TestGetRollingStartMonth:
 
     @patch("strofkabot.utils.reaction_graph.datetime")
     def test_one_month_back(self, mock_datetime):
-        """Test getting 1 month back."""
+        """Test getting 1 month (current month only)."""
         mock_datetime.now.return_value = datetime(2024, 3, 15)
 
         year, month = get_rolling_start_month(1)
 
-        # 1 month before March = February
+        # 1 month including current = just March
         assert year == 2024
-        assert month == 2
+        assert month == 3
 
     @patch("strofkabot.utils.reaction_graph.datetime")
     def test_three_months_back(self, mock_datetime):
-        """Test getting 3 months back."""
+        """Test getting 3 months including current."""
         mock_datetime.now.return_value = datetime(2024, 5, 10)
 
         year, month = get_rolling_start_month(3)
 
-        # 3 months before May: April, March, February
-        # Start month is February
+        # 3 months including May: May, April, March
+        # Start month is March
         assert year == 2024
-        assert month == 2
+        assert month == 3
 
     @patch("strofkabot.utils.reaction_graph.datetime")
     def test_crosses_year_boundary(self, mock_datetime):
@@ -349,21 +349,21 @@ class TestGetRollingStartMonth:
 
         year, month = get_rolling_start_month(3)
 
-        # 3 months before Feb: Jan, Dec, Nov
-        # Start month is November of previous year
+        # 3 months including Feb: Feb, Jan, Dec
+        # Start month is December of previous year
         assert year == 2023
-        assert month == 11
+        assert month == 12
 
     @patch("strofkabot.utils.reaction_graph.datetime")
     def test_january_one_month(self, mock_datetime):
-        """Test 1 month back from January."""
+        """Test 1 month from January (current month only)."""
         mock_datetime.now.return_value = datetime(2024, 1, 15)
 
         year, month = get_rolling_start_month(1)
 
-        # 1 month before Jan = December previous year
-        assert year == 2023
-        assert month == 12
+        # 1 month including current = just January
+        assert year == 2024
+        assert month == 1
 
     @patch("strofkabot.utils.reaction_graph.datetime")
     def test_large_offset_multiple_years(self, mock_datetime):
@@ -372,11 +372,10 @@ class TestGetRollingStartMonth:
 
         year, month = get_rolling_start_month(14)
 
-        # 14 months before March 2024:
-        # Start from Feb 2024 (excluded current month)
-        # Go back 14 months: Jan 2023
+        # 14 months including March 2024:
+        # Go back 13 months from March: Feb 2023
         assert year == 2023
-        assert month == 1
+        assert month == 2
 
 
 class TestFormatPeriodString:
@@ -396,19 +395,19 @@ class TestFormatPeriodString:
         """Test period string for multiple months."""
         mock_datetime.now.return_value = datetime(2024, 5, 10)
 
-        result = format_period_string(2024, 2, 3)
+        result = format_period_string(2024, 3, 3)
 
-        # Should show range: Feb 2024 - Apr 2024
-        assert "Feb 2024" in result
-        assert "Apr 2024" in result
+        # Should show range: Mar 2024 - May 2024 (current month included)
+        assert "Mar 2024" in result
+        assert "May 2024" in result
 
     @patch("strofkabot.utils.reaction_graph.datetime")
     def test_crosses_year_boundary(self, mock_datetime):
         """Test period string crossing year boundary."""
         mock_datetime.now.return_value = datetime(2024, 2, 15)
 
-        result = format_period_string(2023, 11, 3)
+        result = format_period_string(2023, 12, 3)
 
-        # Should show range: Nov 2023 - Jan 2024
-        assert "Nov 2023" in result
-        assert "Jan 2024" in result
+        # Should show range: Dec 2023 - Feb 2024 (current month included)
+        assert "Dec 2023" in result
+        assert "Feb 2024" in result

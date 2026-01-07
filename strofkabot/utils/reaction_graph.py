@@ -268,8 +268,8 @@ def compute_community_layout(
 def get_rolling_start_month(num_months: int = 1) -> tuple[int, int]:
     """Get the start year and month for rolling window.
 
-    The window excludes the current month and goes back num_months.
-    E.g., if today is Jan 7 and num_months=1, returns December (previous month).
+    The window includes the current month and goes back num_months.
+    E.g., if today is Jan 7 and num_months=3, returns November (Nov, Dec, Jan = 3 months).
 
     Args:
         num_months: Number of months to include in the window.
@@ -279,8 +279,8 @@ def get_rolling_start_month(num_months: int = 1) -> tuple[int, int]:
     """
     now = datetime.now()
     year = now.year
-    # Start from previous month (exclude current), then go back num_months
-    month = now.month - num_months
+    # Include current month: go back (num_months - 1) from current
+    month = now.month - num_months + 1
 
     while month <= 0:
         month += 12
@@ -317,9 +317,9 @@ def format_period_string(start_year: int, start_month: int, num_months: int) -> 
     ]
 
     now = datetime.now()
-    # End month is the previous month (current month excluded)
-    end_month = now.month - 1 if now.month > 1 else 12
-    end_year = now.year if now.month > 1 else now.year - 1
+    # End month is the current month (included in window)
+    end_month = now.month
+    end_year = now.year
 
     if num_months == 1:
         return f"{month_names[start_month]} {start_year}"

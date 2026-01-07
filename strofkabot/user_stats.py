@@ -250,3 +250,27 @@ class UserStats:
         self.logger.info(f"Fetching reaction network from {start_year}-{start_month:02d}")
         rows = await self.db.fetch_reaction_network_rolling(start_year, start_month)
         return [(row[0], row[1], row[2]) for row in rows]
+
+    async def get_echo_chamber_data(self, user_id: int, start_year: int, start_month: int) -> dict:
+        """Get reaction distribution data for echo chamber analysis.
+
+        Args:
+            user_id: The Discord user ID.
+            start_year: Start year for the rolling window.
+            start_month: Start month for the rolling window.
+
+        Returns:
+            Dictionary with:
+            - outgoing: list of (receiver_id, count) tuples
+            - incoming: list of (giver_id, count) tuples
+        """
+        self.logger.info(
+            f"Fetching echo chamber data for user {user_id} from {start_year}-{start_month:02d}"
+        )
+        data = await self.db.fetch_user_reaction_distribution_rolling(
+            user_id, start_year, start_month
+        )
+        return {
+            "outgoing": [(row[0], row[1]) for row in data["outgoing"]],
+            "incoming": [(row[0], row[1]) for row in data["incoming"]],
+        }
