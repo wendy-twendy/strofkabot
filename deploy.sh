@@ -7,6 +7,9 @@ systemctl --user stop strofkabot
 echo "Building container..."
 podman build -t strofkabot .
 
+echo "Cleaning up dangling images..."
+podman image prune -f
+
 echo "Starting strofkabot..."
 systemctl --user start strofkabot
 
