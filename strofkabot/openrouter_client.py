@@ -10,6 +10,7 @@ from openai import AsyncOpenAI
 from strofkabot.config import (
     OPENROUTER_INFERENCE_MODEL,
     OPENROUTER_ROUTER_MODEL,
+    OPENROUTER_VISION_MODEL,
 )
 
 logger = logging.getLogger(__name__)
@@ -58,30 +59,25 @@ class OpenRouterClient:
             question: The user's question.
             system_prompt: Discord-aware system instructions.
             context_messages: List of context message dicts with author, content, etc.
-            images: Optional list of image dicts (NOT SUPPORTED - will return error).
+            images: Optional list of image dicts with data (base64) and mime_type.
 
         Returns:
             OpenRouterResponse with the model's answer or error details.
         """
-        # Images not supported via OpenRouter yet
-        if images:
-            return OpenRouterResponse(
-                text="",
-                success=False,
-                error_message="images_not_supported",
-            )
-
         try:
-            # Auto-detect if search/thinking are needed
-            needs_search, needs_thinking = await self._detect_query_requirements(question)
+            # Use vision model for images, otherwise detect search/thinking needs
+            if images:
+                model = OPENROUTER_VISION_MODEL
+                needs_search = False
+                needs_thinking = False
+            else:
+                needs_search, needs_thinking = await self._detect_query_requirements(question)
+                model = OPENROUTER_INFERENCE_MODEL
+                if needs_search:
+                    model = f"{model}:online"
 
             # Build messages in OpenAI format
-            messages = self._build_messages(question, system_prompt, context_messages)
-
-            # Determine model (add :online suffix for search)
-            model = OPENROUTER_INFERENCE_MODEL
-            if needs_search:
-                model = f"{model}:online"
+            messages = self._build_messages(question, system_prompt, context_messages, images)
 
             # Build extra_body for reasoning
             extra_body = {
@@ -188,6 +184,7 @@ Output ONLY valid JSON: {"search": true/false, "thinking": true/false}"""
         question: str,
         system_prompt: str,
         context_messages: list[dict],
+        images: list[dict] | None = None,
     ) -> list[dict]:
         """Build the messages list for the OpenAI-compatible API."""
         messages = [{"role": "system", "content": system_prompt}]
@@ -203,8 +200,16 @@ Output ONLY valid JSON: {"search": true/false, "thinking": true/false}"""
                 }
             )
 
-        # Add the actual question
-        messages.append({"role": "user", "content": question})
+        # Add the actual question (with images if present)
+        if images:
+            # Multimodal format: text first, then images
+            content = [{"type": "text", "text": question}]
+            for img in images:
+                data_url = f"data:{img['mime_type']};base64,{img['data']}"
+                content.append({"type": "image_url", "image_url": {"url": data_url}})
+            messages.append({"role": "user", "content": content})
+        else:
+            messages.append({"role": "user", "content": question})
 
         return messages
 

@@ -110,13 +110,13 @@ class AICog(commands.Cog):
                 response = None
                 used_fallback = False
 
-                # Try OpenRouter first (unless there are images)
-                if self.openrouter_client is not None and not images:
+                # Try OpenRouter first (including for images with vision model)
+                if self.openrouter_client is not None:
                     response = await self.openrouter_client.ask_with_context(
                         question=question,
                         system_prompt=system_prompt,
                         context_messages=context_dicts,
-                        images=None,
+                        images=images if images else None,
                     )
 
                     if response.success:
@@ -130,7 +130,7 @@ class AICog(commands.Cog):
                         )
                         response = None  # Try Gemini fallback
 
-                # Fall back to Gemini (for images or if OpenRouter failed)
+                # Fall back to Gemini if OpenRouter failed
                 if response is None and self.gemini_client is not None:
                     used_fallback = True
                     response = await self.gemini_client.ask_with_context(

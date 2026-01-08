@@ -38,3 +38,4 @@ OPENROUTER_INFERENCE_MODEL = "xiaomi/mimo-v2-flash:free"  # Fast, free inference
 OPENROUTER_ROUTER_MODEL = (
     "xiaomi/mimo-v2-flash:free"  # Fast, free classifier for search/thinking detection
 )
+OPENROUTER_VISION_MODEL = "google/gemini-3-flash-preview"  # Vision model for images
