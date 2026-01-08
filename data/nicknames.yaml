@@ -1,0 +1,129 @@
+# User nickname mappings for RAG system
+# Format: author_id -> list of nicknames
+
+nicknames:
+  687104464267509841:  # Gogo Soros
+    - papa
+  416623828920172544:  # Hildegard Orgonakkumulator
+    - shark
+    - sharku
+    - sharko
+  808107051523112970:  # Professor Pidhlinçi
+    - geri
+  693462918569918514:  # Cappuccino Assassino
+    - jezi
+    - yeezi
+    - jez
+    - yez
+    - yezi
+  236147277050150912:  # filan fisteku
+    - zhani
+    - zhan
+  244592645647761408:  # Aida Komnenë-Baraku
+    - gpu
+  686998161163812968:  # basstein
+    - bas
+    - bass
+    - basi
+  301411562487545857:  # Takarak
+    - taka
+  238553996657295361:  # dave_a7x
+    - dejv
+    - dejvi
+    - dave
+  402998533789188106:  # Xhejk Pulalta
+    - pula
+  541164842837475329:  # Fluronvdekja
+    - cimi
+  181023132197453825:  # Al Pancino
+    - panci
+    - panc
+  682962605005865021:  # Ladi
+    - ladi
+  1150073092241100820:  # Monad
+    - mondi
+    - monad
+  687107944948826141:  # Pingolas, 30+
+    - ping
+    - pingu
+  331899331659431937:  # Toodo
+    - altudo
+    - tudo
+  456210790349930498:  # vali
+    - vali
+  364769886033018892:  # Beqtito Pidhjelini
+    - beqo
+    - bequa
+  252543968477184001:  # Manjaku Burrelit
+    - zako
+  457293684216430612:  # Zaros
+    - zaros
+  530757801157591050:  # KingOfGames
+    - allmight
+    - almight
+    - allmighti
+    - almighti
+  562744093000859658:  # Pelokuqodas
+    - kuqo
+  388971687212875776:  # Kaçinari
+    - jordi
+  553920459117297664:  # Der Rectumswagen
+    - goti
+  1132016190567481364:  # xhimi
+    - xhimi
+  660191436326699031:  # soop000
+    - soop
+    - supi
+  364279339279319041:  # d31a
+    - dela
+  661757223201931276:  # Giggly Pordhë
+    - igi
+    - iggy
+  433362860672811029:  # Manjaku Danubit
+    - mia
+  714599859889635449:  # Rizoto Kanina
+    - rizo
+  312187759160983553:  # Fshatari Rroçkëgungë
+    - niku
+  761693073788633088:  # pseudokokus
+    - koku
+    - pseudo
+    - pseudokoku
+  371124505982271489:  # Këmigo Mbëntonja
+    - kemi
+  1161042286105342042:  # gardalina
+    - gardalina
+    - lina
+  1103386307692089524:  # Tutoreshë Lavdia
+    - lavdia
+    - lavdo
+  310147647509889024:  # Argos
+    - ardi
+  648836872214282240:  # Këno
+    - keno
+  357995586332655617:  # L0STCTRL
+    - lost
+    - losti
+  546738378473865236:  # iLLYR1ANS
+    - iliri
+  1248592638031040584:  # Mimoza Ahmeti
+    - moza
+  446630077849927683:  # Violonçel Eksploruesja
+    - viola
+    - vjola
+  492731386415939584:  # diti
+    - diti
+  418092786005573641:  # maka
+    - maka
+  1275873276324741183:  # Ballerina Cappuccina
+    - ledia
+  1079160154043465758:  # Enrico Dandolo
+    - dandolo
+  325678635388502016:  # Nikolla Paskozy
+    - pasa
+  1178740644768923732:  # Avni Rotocarios
+    - avni
+  538716278014345217:  # Buzz
+    - buz
+    - buzzi
+    - buzz

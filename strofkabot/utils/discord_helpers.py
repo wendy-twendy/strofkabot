@@ -301,26 +301,26 @@ async def send_most_liked_stats(
 
 def get_diversity_label(score: float) -> str:
     """Get human-readable label for diversity score."""
-    if score >= 0.75:
+    if score >= 0.90:
+        return "Very High"
+    elif score >= 0.83:
         return "High"
-    elif score >= 0.5:
+    elif score >= 0.75:
         return "Moderate"
-    elif score >= 0.25:
-        return "Low"
     else:
-        return "Very Low"
+        return "Low"
 
 
 def get_index_label(index: int) -> str:
     """Get human-readable label for echo chamber index."""
-    if index <= 25:
+    if index <= 12:
         return "Very Diverse"
-    elif index <= 50:
-        return "Moderate"
-    elif index <= 75:
+    elif index <= 17:
+        return "Balanced"
+    elif index <= 22:
         return "Concentrated"
     else:
-        return "High"
+        return "Echo Chamber"
 
 
 def _get_trade_status(balance: int) -> str:
@@ -435,6 +435,29 @@ def format_connections_report(
 
     for i, (user_a, user_b, affinity) in enumerate(affinities[:limit], 1):
         response += f"{i:2}. {user_a} <-> {user_b}: {affinity:.3f}\n"
+
+    response += "```"
+
+    return response
+
+
+def format_top_connections_by_user(
+    connections: list[tuple[str, str, float]], period_str: str
+) -> str:
+    """Format a report showing each active user's top connection.
+
+    Args:
+        connections: List of (user, partner, affinity) tuples, sorted by affinity
+        period_str: Formatted period string (e.g., "January 2025")
+
+    Returns:
+        Formatted report string
+    """
+    response = f"**Top Connections by User** ({period_str})\n"
+    response += "*Users with 30+ messages*\n```\n"
+
+    for i, (user, partner, affinity) in enumerate(connections, 1):
+        response += f"{i:2}. {user} -> {partner}: {affinity:.3f}\n"
 
     response += "```"
 

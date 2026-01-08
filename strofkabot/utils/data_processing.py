@@ -385,11 +385,11 @@ def calculate_echo_chamber_metrics(
         echo_chamber_index = round(avg_concentration * 100)
 
     # Generate interpretation
-    if echo_chamber_index <= 25:
-        interpretation = "Very diverse - you engage broadly"
-    elif echo_chamber_index <= 50:
-        interpretation = "Moderate - healthy mix of close ties and broader engagement"
-    elif echo_chamber_index <= 75:
+    if echo_chamber_index <= 12:
+        interpretation = "Very diverse - you engage broadly across the community"
+    elif echo_chamber_index <= 17:
+        interpretation = "Balanced - healthy mix of close ties and broader engagement"
+    elif echo_chamber_index <= 22:
         interpretation = "Concentrated - you have a clear inner circle"
     else:
         interpretation = "Echo chamber - most interactions within a small group"

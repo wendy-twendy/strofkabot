@@ -92,6 +92,36 @@ def compute_all_affinities(G: nx.DiGraph) -> list[tuple[str, str, float]]:
     return affinities
 
 
+def compute_top_connection_per_user(
+    affinities: list[tuple[str, str, float]], active_users: set[str]
+) -> list[tuple[str, str, float]]:
+    """Find the top connection for each active user.
+
+    Args:
+        affinities: List of (user_a, user_b, affinity) tuples from compute_all_affinities().
+        active_users: Set of usernames considered active (e.g., 30+ messages).
+
+    Returns:
+        List of (user, partner, affinity) tuples sorted by affinity descending.
+        Each active user appears at most once with their strongest connection.
+    """
+    user_top: dict[str, tuple[str, float]] = {}
+
+    # affinities are already sorted by score descending
+    for user_a, user_b, affinity in affinities:
+        # Check if user_a is active and doesn't have a top connection yet
+        if user_a in active_users and user_a not in user_top:
+            user_top[user_a] = (user_b, affinity)
+        # Check if user_b is active and doesn't have a top connection yet
+        if user_b in active_users and user_b not in user_top:
+            user_top[user_b] = (user_a, affinity)
+
+    # Convert to list and sort by affinity descending
+    result = [(user, partner, affinity) for user, (partner, affinity) in user_top.items()]
+    result.sort(key=lambda x: x[2], reverse=True)
+    return result
+
+
 def build_affinity_graph(
     G: nx.DiGraph,
     affinities: list[tuple[str, str, float]],

@@ -18,11 +18,13 @@ from strofkabot.utils import (
     compute_all_affinities,
     compute_community_layout,
     compute_node_activity,
+    compute_top_connection_per_user,
     create_reaction_graph_plot,
     detect_communities,
     format_clusters_report,
     format_connections_report,
     format_period_string,
+    format_top_connections_by_user,
     get_diversity_label,
     get_index_label,
     get_rolling_start_month,
@@ -124,13 +126,21 @@ class NetworkCog(commands.Cog):
             await ctx.send("An error occurred while generating the graph.")
 
     @commands.command(
-        name="connections", help="Shows top 10 mutual relationships with month navigation."
+        name="connections",
+        help="Shows top connection per active user. Use --top for top 10 pairs.",
     )
-    async def show_connections(self, ctx: commands.Context):
-        """Show top 10 mutual relationships for the current month with navigation."""
-        await self._send_connections(ctx, month_offset=0)
+    async def show_connections(self, ctx: commands.Context, *, args: str = ""):
+        """Show connections for the current month with navigation.
 
-    async def _send_connections(self, ctx: commands.Context, month_offset: int):
+        Default: Shows each active user's (30+ messages) top connection, ranked by affinity.
+        --top: Shows top 10 mutual relationships (pairs) ranked by affinity.
+        """
+        show_top_pairs = "--top" in args.lower()
+        await self._send_connections(ctx, month_offset=0, show_top_pairs=show_top_pairs)
+
+    async def _send_connections(
+        self, ctx: commands.Context, month_offset: int, show_top_pairs: bool = False
+    ):
         """Send connections message with navigation reactions."""
         try:
             now = datetime.datetime.now(datetime.UTC)
@@ -156,7 +166,29 @@ class NetworkCog(commands.Cog):
                 await ctx.send(f"No mutual connections found for {period_str}.")
                 return
 
-            response = format_connections_report(affinities, period_str)
+            if show_top_pairs:
+                response = format_connections_report(affinities, period_str)
+            else:
+                # Get active users (30+ messages)
+                active_users = set()
+                for r in rows:
+                    if r["giver_messages"] >= 30:
+                        active_users.add(r["giver_username"])
+                    if r["receiver_messages"] >= 30:
+                        active_users.add(r["receiver_username"])
+
+                if not active_users:
+                    await ctx.send(f"No active users (30+ messages) found for {period_str}.")
+                    return
+
+                top_connections = compute_top_connection_per_user(affinities, active_users)
+
+                if not top_connections:
+                    await ctx.send(f"No connections found for active users in {period_str}.")
+                    return
+
+                response = format_top_connections_by_user(top_connections, period_str)
+
             message = await ctx.send(response)
             self.logger.info("Connections sent successfully")
 
@@ -164,7 +196,7 @@ class NetworkCog(commands.Cog):
                 self.bot,
                 message,
                 month_offset,
-                lambda new_offset: self._send_connections(ctx, new_offset),
+                lambda new_offset: self._send_connections(ctx, new_offset, show_top_pairs),
             )
         except Exception:
             self.logger.exception("Error generating connections")
