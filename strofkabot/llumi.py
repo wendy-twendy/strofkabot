@@ -19,10 +19,12 @@ from strofkabot.config import (
     ARTAN_QUOTES_PATH,
     ATTACHMENTS_DIR,
     DATABASE_FILE_LOCATION,
+    GEMINI_MAX_CONTEXT_MESSAGES,
     GUILD_ID,
     UPDATE_INTERVAL_SECONDS,
 )
 from strofkabot.discord_db import Database
+from strofkabot.gemini_client import GeminiClient
 from strofkabot.message_filter import MessageFilter
 from strofkabot.tasks import BackgroundTaskManager
 from strofkabot.user_stats import UserStats
@@ -30,6 +32,7 @@ from strofkabot.utils import (
     adjust_month,
     build_affinity_graph,
     build_reaction_graph,
+    build_system_prompt,
     calculate_echo_chamber_metrics,
     calculate_monthly_inflation,
     calculate_yearly_inflation,
@@ -43,18 +46,30 @@ from strofkabot.utils import (
     create_reaction_graph_plot,
     create_yearly_inflation_plot,
     detect_communities,
+    fetch_context_messages,
     fetch_gdp_data,
     fetch_hdi_data,
     fetch_hourly_activity_data_for_range,
     fetch_inflation_data,
+    format_clusters_report,
+    format_connections_report,
+    format_error_response,
+    format_monthly_trade_report,
     format_period_string,
+    format_yearly_trade_report,
+    get_diversity_label,
+    get_index_label,
     get_reaction_trade_data,
     get_reaction_trade_data_for_month,
     get_rolling_start_month,
+    handle_month_navigation,
+    parse_prediction_date,
     parse_rpm_args,
+    prepare_context,
     send_leaderboard,
     send_most_liked_stats,
     send_personal_stats,
+    split_response,
 )
 
 load_dotenv()
@@ -81,6 +96,20 @@ class LlumiBot(commands.Cog):
         self.task_manager = BackgroundTaskManager(
             bot=bot, db=db, user_stats=user_stats, message_filter=MessageFilter(), logger=logger
         )
+
+        self._gemini_client: GeminiClient | None = None
+
+    @property
+    def gemini_client(self) -> GeminiClient | None:
+        """Lazy initialization of Gemini client."""
+        if self._gemini_client is None:
+            try:
+                self._gemini_client = GeminiClient()
+                self.logger.info("Gemini client initialized successfully")
+            except ValueError as e:
+                self.logger.warning(f"Gemini client not available: {e}")
+                return None
+        return self._gemini_client
 
     async def cog_load(self):
         await self.db.initialize()
@@ -171,6 +200,79 @@ class LlumiBot(commands.Cog):
             await ctx.send("Quote feature is currently unavailable.")
 
     @commands.command(
+        name="ask",
+        help="Ask a question with AI assistance. Uses recent chat context and web search.",
+    )
+    async def ask_question(self, ctx: commands.Context, *, question: str = ""):
+        """Answer a question using Gemini AI with conversation context.
+
+        Usage: !ask <your question>
+
+        The bot will consider the last 10 messages in the channel as context,
+        including any images. It can also search the web for current information.
+        """
+        if not question.strip():
+            await ctx.send(format_error_response("no_question"))
+            return
+
+        if len(question) > 20000:
+            await ctx.send(format_error_response("too_long"))
+            return
+
+        if self.gemini_client is None:
+            await ctx.send(format_error_response("config"))
+            return
+
+        self.logger.info(f"Ask command from {ctx.author}: {question[:50]}...")
+
+        async with ctx.typing():
+            try:
+                messages = await fetch_context_messages(
+                    ctx.channel,
+                    exclude_message_id=ctx.message.id,
+                    limit=GEMINI_MAX_CONTEXT_MESSAGES,
+                )
+
+                context_dicts, images = await prepare_context(messages)
+
+                user_roles = [role.name for role in ctx.author.roles if role.name != "@everyone"]
+                system_prompt = build_system_prompt(
+                    guild_name=ctx.guild.name if ctx.guild else "Direct Message",
+                    channel_name=ctx.channel.name if hasattr(ctx.channel, "name") else "DM",
+                    user_name=ctx.author.display_name,
+                    user_roles=user_roles,
+                )
+
+                response = await self.gemini_client.ask_with_context(
+                    question=question,
+                    system_prompt=system_prompt,
+                    context_messages=context_dicts,
+                    images=images if images else None,
+                )
+
+                if not response.success:
+                    self.logger.error(f"Gemini error: {response.error_message}")
+                    if "Daily limit" in (response.error_message or ""):
+                        await ctx.send(format_error_response("exhausted"))
+                    elif "rate" in (response.error_message or "").lower():
+                        await ctx.send(format_error_response("rate_limit"))
+                    else:
+                        await ctx.send(format_error_response("api", response.error_message))
+                    return
+
+                chunks = split_response(response.text)
+                for chunk in chunks:
+                    await ctx.send(chunk)
+
+                self.logger.info(
+                    f"Ask command completed for {ctx.author} using model {response.model_used}"
+                )
+
+            except Exception:
+                self.logger.exception("Unexpected error in ask command")
+                await ctx.send(format_error_response("api"))
+
+    @commands.command(
         name="rpm",
         help="Shows reaction stats. Use --leaderboard for rankings, --least for lowest, --all for all users.",
     )
@@ -246,38 +348,7 @@ class LlumiBot(commands.Cog):
         try:
             self.logger.info(f"Generating yearly trade report for user {target_user.id}")
             trade_data = await get_reaction_trade_data(self.user_stats, target_user.id, self.guild)
-
-            report = f"**Reaction Trade Report for {target_user.display_name}**\n"
-            report += "*Data from the past 12 months*\n```\n"
-
-            report += "Top Export Partners (Reactions Given):\n"
-            if trade_data["exports"]:
-                for partner, count in trade_data["exports"]:
-                    report += f"  {partner:<20} {count:>6}\n"
-            else:
-                report += "  No reactions given\n"
-
-            report += "\nTop Import Partners (Reactions Received):\n"
-            if trade_data["imports"]:
-                for partner, count in trade_data["imports"]:
-                    report += f"  {partner:<20} {count:>6}\n"
-            else:
-                report += "  No reactions received\n"
-
-            report += "\nTrade Summary:\n"
-            report += f"  Total Reactions Given:    {trade_data['total_given']:>6}\n"
-            report += f"  Total Reactions Received: {trade_data['total_received']:>6}\n"
-            report += f"  Trade Balance:            {trade_data['trade_balance']:>6}\n"
-
-            status = (
-                "SURPLUS"
-                if trade_data["trade_balance"] > 0
-                else "DEFICIT"
-                if trade_data["trade_balance"] < 0
-                else "NEUTRAL"
-            )
-            report += f"\nTrade Status: {status}```"
-
+            report = format_yearly_trade_report(trade_data, target_user.display_name)
             await ctx.send(report)
             self.logger.info(f"Yearly trade report sent for user {target_user.id}")
         except Exception as e:
@@ -289,7 +360,6 @@ class LlumiBot(commands.Cog):
     ):
         """Send monthly trade report with navigation reactions."""
         try:
-            # Get target month
             now = datetime.datetime.now(datetime.UTC)
             target_year, target_month = adjust_month(now.year, now.month, month_offset)
 
@@ -302,78 +372,18 @@ class LlumiBot(commands.Cog):
                 self.user_stats, target_user.id, target_year, target_month, self.guild
             )
 
-            # Format period string
             period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
+            report = format_monthly_trade_report(trade_data, target_user.display_name, period_str)
 
-            report = f"**Reaction Trade Report for {target_user.display_name}**\n"
-            report += f"*{period_str}*\n```\n"
-
-            # Check if there's any data
-            has_data = trade_data["total_given"] > 0 or trade_data["total_received"] > 0
-
-            if not has_data:
-                report += "No trading activity this month.\n"
-            else:
-                report += "Top Export Partners (Reactions Given):\n"
-                if trade_data["exports"]:
-                    for partner, count in trade_data["exports"]:
-                        report += f"  {partner:<20} {count:>6}\n"
-                else:
-                    report += "  No reactions given\n"
-
-                report += "\nTop Import Partners (Reactions Received):\n"
-                if trade_data["imports"]:
-                    for partner, count in trade_data["imports"]:
-                        report += f"  {partner:<20} {count:>6}\n"
-                else:
-                    report += "  No reactions received\n"
-
-                report += "\nTrade Summary:\n"
-                report += f"  Total Reactions Given:    {trade_data['total_given']:>6}\n"
-                report += f"  Total Reactions Received: {trade_data['total_received']:>6}\n"
-                report += f"  Trade Balance:            {trade_data['trade_balance']:>6}\n"
-
-                status = (
-                    "SURPLUS"
-                    if trade_data["trade_balance"] > 0
-                    else "DEFICIT"
-                    if trade_data["trade_balance"] < 0
-                    else "NEUTRAL"
-                )
-                report += f"\nTrade Status: {status}"
-
-            report += "```"
-
-            # Send message and add navigation reactions
             message = await ctx.send(report)
-            await message.add_reaction("⬅️")
-            await message.add_reaction("➡️")
-
             self.logger.info(f"Monthly trade report sent for user {target_user.id}")
 
-            # Wait for navigation reactions
-            def check(reaction, user):
-                return (
-                    reaction.message.id == message.id
-                    and str(reaction.emoji) in ["⬅️", "➡️"]
-                    and not user.bot
-                )
-
-            while True:
-                try:
-                    reaction, user = await self.bot.wait_for(
-                        "reaction_add", timeout=60.0, check=check
-                    )
-                    new_offset = month_offset
-                    if str(reaction.emoji) == "⬅️":
-                        new_offset -= 1
-                    elif str(reaction.emoji) == "➡️":
-                        new_offset += 1
-                    await message.delete()
-                    await self._send_monthly_trade(ctx, target_user, new_offset)
-                    break
-                except TimeoutError:
-                    break
+            await handle_month_navigation(
+                self.bot,
+                message,
+                month_offset,
+                lambda new_offset: self._send_monthly_trade(ctx, target_user, new_offset),
+            )
         except Exception as e:
             self.logger.exception(f"Error generating monthly trade report: {e}")
             await ctx.send("An error occurred while generating the trade report.")
@@ -518,76 +528,39 @@ class LlumiBot(commands.Cog):
     async def _send_connections(self, ctx: commands.Context, month_offset: int):
         """Send connections message with navigation reactions."""
         try:
-            # Get target month
             now = datetime.datetime.now(datetime.UTC)
             target_year, target_month = adjust_month(now.year, now.month, month_offset)
+            period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
 
             self.logger.info(f"Generating connections for {target_year}-{target_month:02d}")
 
-            # Fetch single month data
             rows = await self.user_stats.get_reaction_network_for_month(target_year, target_month)
 
             if not rows:
-                period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
                 await ctx.send(f"No reaction data available for {period_str}.")
                 return
 
-            # Convert to tuples for graph functions
             reaction_data = [
                 (r["giver_username"], r["receiver_username"], r["reaction_count"]) for r in rows
             ]
 
-            # Build graph and compute affinities
             directed_graph = build_reaction_graph(reaction_data)
             affinities = compute_all_affinities(directed_graph)
 
             if not affinities:
-                period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
                 await ctx.send(f"No mutual connections found for {period_str}.")
                 return
 
-            # Format period string
-            period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
-
-            # Build response with top 10
-            response = f"**Top 10 Mutual Relationships** ({period_str})\n"
-            response += "*Mutual Affinity Score*\n```\n"
-
-            for i, (user_a, user_b, affinity) in enumerate(affinities[:10], 1):
-                response += f"{i:2}. {user_a} <-> {user_b}: {affinity:.3f}\n"
-
-            response += "```"
-
-            # Send message and add navigation reactions
+            response = format_connections_report(affinities, period_str)
             message = await ctx.send(response)
-            await message.add_reaction("⬅️")
-            await message.add_reaction("➡️")
-
             self.logger.info("Connections sent successfully")
 
-            # Wait for navigation reactions
-            def check(reaction, user):
-                return (
-                    reaction.message.id == message.id
-                    and str(reaction.emoji) in ["⬅️", "➡️"]
-                    and not user.bot
-                )
-
-            while True:
-                try:
-                    reaction, user = await self.bot.wait_for(
-                        "reaction_add", timeout=60.0, check=check
-                    )
-                    new_offset = month_offset
-                    if str(reaction.emoji) == "⬅️":
-                        new_offset -= 1
-                    elif str(reaction.emoji) == "➡️":
-                        new_offset += 1
-                    await message.delete()
-                    await self._send_connections(ctx, new_offset)
-                    break
-                except TimeoutError:
-                    break
+            await handle_month_navigation(
+                self.bot,
+                message,
+                month_offset,
+                lambda new_offset: self._send_connections(ctx, new_offset),
+            )
         except Exception:
             self.logger.exception("Error generating connections")
             await ctx.send("An error occurred while generating the connections.")
@@ -674,49 +647,17 @@ class LlumiBot(commands.Cog):
             # Sort groups by size (largest first) and members alphabetically
             sorted_groups = sorted(community_groups.items(), key=lambda x: (-len(x[1]), x[0]))
 
-            # Format period string
             period_str = format_period_string(start_year, start_month, months)
-
-            # Build response
-            response = f"**Social Clusters** ({period_str})\n"
-            response += f"*{len(sorted_groups)} groups, {len(communities)} members*\n```\n"
-
-            for comm_id, members in sorted_groups:
-                members_sorted = sorted(members)
-                response += f"Group {comm_id + 1} ({len(members)}): {', '.join(members_sorted)}\n"
-
-            response += "```"
-
-            # Send message and add navigation reactions
+            response = format_clusters_report(sorted_groups, period_str, len(communities))
             message = await ctx.send(response)
-            await message.add_reaction("⬅️")
-            await message.add_reaction("➡️")
-
             self.logger.info("Clusters sent successfully")
 
-            # Wait for navigation reactions
-            def check(reaction, user):
-                return (
-                    reaction.message.id == message.id
-                    and str(reaction.emoji) in ["⬅️", "➡️"]
-                    and not user.bot
-                )
-
-            while True:
-                try:
-                    reaction, user = await self.bot.wait_for(
-                        "reaction_add", timeout=60.0, check=check
-                    )
-                    new_offset = month_offset
-                    if str(reaction.emoji) == "⬅️":
-                        new_offset -= 1
-                    elif str(reaction.emoji) == "➡️":
-                        new_offset += 1
-                    await message.delete()
-                    await self._send_clusters(ctx, months, new_offset)
-                    break
-                except TimeoutError:
-                    break
+            await handle_month_navigation(
+                self.bot,
+                message,
+                month_offset,
+                lambda new_offset: self._send_clusters(ctx, months, new_offset),
+            )
         except Exception:
             self.logger.exception("Error generating clusters")
             await ctx.send("An error occurred while generating clusters.")
@@ -843,7 +784,7 @@ class LlumiBot(commands.Cog):
             return
 
         # Parse date from args
-        parsed_date, prediction_text = self._parse_prediction_args(args)
+        parsed_date, prediction_text = parse_prediction_date(args)
 
         if not parsed_date:
             await ctx.send(
@@ -897,36 +838,6 @@ class LlumiBot(commands.Cog):
         except Exception:
             self.logger.exception("Error storing prediction")
             await ctx.send("An error occurred while storing your prediction.")
-
-    def _parse_prediction_args(self, args: str) -> tuple:
-        """Parse date and text from prediction args.
-
-        Returns tuple of (datetime or None, remaining_text).
-        """
-        import dateparser
-
-        words = args.split()
-        parsed_date = None
-        date_word_count = 0
-
-        # Try progressively longer prefixes as dates (up to 4 words)
-        for i in range(1, min(len(words) + 1, 5)):
-            candidate = " ".join(words[:i])
-            result = dateparser.parse(
-                candidate,
-                settings={
-                    "PREFER_DATES_FROM": "future",
-                    "RETURN_AS_TIMEZONE_AWARE": True,
-                    "TIMEZONE": "UTC",
-                    "DATE_ORDER": "DMY",
-                },
-            )
-            if result:
-                parsed_date = result
-                date_word_count = i
-
-        prediction_text = " ".join(words[date_word_count:]) if date_word_count > 0 else ""
-        return parsed_date, prediction_text
 
     @commands.command(
         name="activity",
@@ -1028,32 +939,14 @@ class LlumiBot(commands.Cog):
                 self.logger.info(f"Activity heatmap sent for user {target_user.id}")
 
             # Add navigation reactions
-            await message.add_reaction("⬅️")
-            await message.add_reaction("➡️")
-
-            # Wait for navigation reactions
-            def check(reaction, user):
-                return (
-                    reaction.message.id == message.id
-                    and str(reaction.emoji) in ["⬅️", "➡️"]
-                    and not user.bot
-                )
-
-            while True:
-                try:
-                    reaction, user = await self.bot.wait_for(
-                        "reaction_add", timeout=60.0, check=check
-                    )
-                    new_offset = window_offset
-                    if str(reaction.emoji) == "⬅️":
-                        new_offset -= 1  # Go to previous window
-                    elif str(reaction.emoji) == "➡️":
-                        new_offset += 1  # Go to next window
-                    await message.delete()
-                    await self._send_activity_heatmap(ctx, target_user, num_months, new_offset)
-                    break
-                except TimeoutError:
-                    break
+            await handle_month_navigation(
+                self.bot,
+                message,
+                window_offset,
+                lambda new_offset: self._send_activity_heatmap(
+                    ctx, target_user, num_months, new_offset
+                ),
+            )
 
         except Exception:
             self.logger.exception("Error generating activity heatmap")
@@ -1116,7 +1009,7 @@ class LlumiBot(commands.Cog):
                     f"  Top 3 recipients: {metrics['outgoing_top3_pct']:.1f}% of all reactions\n"
                 )
                 response += f"  Diversity Score: {metrics['outgoing_diversity']:.2f}/1.00"
-                diversity_label = self._get_diversity_label(metrics["outgoing_diversity"])
+                diversity_label = get_diversity_label(metrics["outgoing_diversity"])
                 response += f" ({diversity_label})\n"
                 response += "  Your top targets: "
                 top_names = []
@@ -1136,7 +1029,7 @@ class LlumiBot(commands.Cog):
                     f"  Top 3 givers: {metrics['incoming_top3_pct']:.1f}% of all reactions\n"
                 )
                 response += f"  Diversity Score: {metrics['incoming_diversity']:.2f}/1.00"
-                diversity_label = self._get_diversity_label(metrics["incoming_diversity"])
+                diversity_label = get_diversity_label(metrics["incoming_diversity"])
                 response += f" ({diversity_label})\n"
                 response += "  Your top fans: "
                 top_names = []
@@ -1151,7 +1044,7 @@ class LlumiBot(commands.Cog):
 
             # Echo Chamber Index
             response += f"Echo Chamber Index: {metrics['echo_chamber_index']}/100"
-            index_label = self._get_index_label(metrics["echo_chamber_index"])
+            index_label = get_index_label(metrics["echo_chamber_index"])
             response += f" ({index_label})\n"
             response += metrics["interpretation"]
 
@@ -1163,28 +1056,6 @@ class LlumiBot(commands.Cog):
         except Exception:
             self.logger.exception("Error generating echo chamber analysis")
             await ctx.send("An error occurred while generating the echo chamber analysis.")
-
-    def _get_diversity_label(self, score: float) -> str:
-        """Get human-readable label for diversity score."""
-        if score >= 0.75:
-            return "High"
-        elif score >= 0.5:
-            return "Moderate"
-        elif score >= 0.25:
-            return "Low"
-        else:
-            return "Very Low"
-
-    def _get_index_label(self, index: int) -> str:
-        """Get human-readable label for echo chamber index."""
-        if index <= 25:
-            return "Very Diverse"
-        elif index <= 50:
-            return "Moderate"
-        elif index <= 75:
-            return "Concentrated"
-        else:
-            return "High"
 
 
 def setup_logging(log_level: str) -> logging.Logger:

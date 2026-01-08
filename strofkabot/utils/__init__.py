@@ -1,5 +1,12 @@
 """Utility functions for the Strofkabot Discord bot."""
 
+from strofkabot.utils.ask_helpers import (
+    build_system_prompt,
+    fetch_context_messages,
+    format_error_response,
+    prepare_context,
+    split_response,
+)
 from strofkabot.utils.data_processing import (
     calculate_echo_chamber_metrics,
     calculate_monthly_inflation,
@@ -18,12 +25,19 @@ from strofkabot.utils.data_processing import (
     perform_kmeans_clustering,
     prepare_clustering_data,
 )
-from strofkabot.utils.date_utils import adjust_month
+from strofkabot.utils.date_utils import adjust_month, parse_prediction_date
 from strofkabot.utils.discord_helpers import (
     calculate_average_preference_share,
+    format_clusters_report,
+    format_connections_report,
+    format_monthly_trade_report,
+    format_yearly_trade_report,
+    get_diversity_label,
+    get_index_label,
     get_member_names,
     get_non_bot_member_ids,
     get_reply_info,
+    handle_month_navigation,
     parse_rpm_args,
     send_leaderboard,
     send_most_liked_stats,
@@ -52,51 +66,65 @@ from strofkabot.utils.visualization import (
 )
 
 __all__ = [
-    # Date utilities
-    "adjust_month",
-    # Visualization
-    "create_activity_heatmap",
-    "create_monthly_inflation_plot",
-    "create_yearly_inflation_plot",
-    "determine_figure_size",
-    "generate_reaction_matrix_plot",
-    "generate_cluster_plot",
-    "create_gdp_plot",
-    "create_hdi_plot",
-    "create_reaction_graph_plot",
+    # Ask helpers
+    "build_system_prompt",
+    "fetch_context_messages",
+    "format_error_response",
+    "prepare_context",
+    "split_response",
     # Data processing
-    "fetch_inflation_data",
+    "calculate_echo_chamber_metrics",
     "calculate_monthly_inflation",
+    "calculate_normalized_entropy",
+    "calculate_reaction_percentage",
+    "calculate_top_n_concentration",
     "calculate_yearly_inflation",
     "fetch_gdp_data",
     "fetch_hdi_data",
     "fetch_hourly_activity_data",
     "fetch_hourly_activity_data_for_month",
     "fetch_hourly_activity_data_for_range",
+    "fetch_inflation_data",
     "get_reaction_trade_data",
     "get_reaction_trade_data_for_month",
-    "calculate_reaction_percentage",
-    "prepare_clustering_data",
     "perform_kmeans_clustering",
-    "calculate_normalized_entropy",
-    "calculate_top_n_concentration",
-    "calculate_echo_chamber_metrics",
+    "prepare_clustering_data",
+    # Date utilities
+    "adjust_month",
+    "parse_prediction_date",
     # Discord helpers
-    "parse_rpm_args",
-    "send_leaderboard",
-    "send_personal_stats",
-    "get_reply_info",
+    "calculate_average_preference_share",
+    "format_clusters_report",
+    "format_connections_report",
+    "format_monthly_trade_report",
+    "format_yearly_trade_report",
+    "get_diversity_label",
+    "get_index_label",
     "get_member_names",
     "get_non_bot_member_ids",
+    "get_reply_info",
+    "handle_month_navigation",
+    "parse_rpm_args",
+    "send_leaderboard",
     "send_most_liked_stats",
-    "calculate_average_preference_share",
+    "send_personal_stats",
     # Reaction graph
-    "build_reaction_graph",
     "build_affinity_graph",
+    "build_reaction_graph",
     "compute_all_affinities",
     "compute_community_layout",
     "compute_node_activity",
     "detect_communities",
     "format_period_string",
     "get_rolling_start_month",
+    # Visualization
+    "create_activity_heatmap",
+    "create_gdp_plot",
+    "create_hdi_plot",
+    "create_monthly_inflation_plot",
+    "create_reaction_graph_plot",
+    "create_yearly_inflation_plot",
+    "determine_figure_size",
+    "generate_cluster_plot",
+    "generate_reaction_matrix_plot",
 ]

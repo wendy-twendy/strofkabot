@@ -2,10 +2,54 @@
 
 import datetime
 from collections import defaultdict
+from collections.abc import Awaitable, Callable
 
 import discord
+from discord.ext import commands
 
 from strofkabot.utils.date_utils import adjust_month
+
+
+async def handle_month_navigation(
+    bot: commands.Bot,
+    message: discord.Message,
+    current_offset: int,
+    callback: Callable[[int], Awaitable[None]],
+    timeout: float = 60.0,
+) -> None:
+    """Add navigation reactions and handle month navigation.
+
+    Adds left/right arrow reactions to the message and waits for user interaction.
+    On navigation, deletes the message and calls the callback with the new offset.
+
+    Args:
+        bot: Discord bot instance (for wait_for)
+        message: Message to add reactions to
+        current_offset: Current month offset value
+        callback: Async function(new_offset) to regenerate the view
+        timeout: Seconds to wait for reaction (default 60)
+    """
+    await message.add_reaction("⬅️")
+    await message.add_reaction("➡️")
+
+    def check(reaction: discord.Reaction, user: discord.User) -> bool:
+        return (
+            reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"] and not user.bot
+        )
+
+    while True:
+        try:
+            reaction, user = await bot.wait_for("reaction_add", timeout=timeout, check=check)
+            new_offset = current_offset
+            if str(reaction.emoji) == "⬅️":
+                new_offset -= 1
+            elif str(reaction.emoji) == "➡️":
+                new_offset += 1
+            await message.delete()
+            await callback(new_offset)
+            break
+        except TimeoutError:
+            break
 
 
 def parse_rpm_args(args: tuple) -> dict[str, bool]:
@@ -72,25 +116,12 @@ async def send_leaderboard(
         response += "```"
 
         message = await ctx.send(response)
-        await message.add_reaction("⬅️")
-        await message.add_reaction("➡️")
-
-        def check(reaction, user):
-            return reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
-
-        while True:
-            try:
-                reaction, user = await bot.wait_for("reaction_add", timeout=60.0, check=check)
-                new_offset = month_offset
-                if str(reaction.emoji) == "⬅️":
-                    new_offset -= 1
-                elif str(reaction.emoji) == "➡️":
-                    new_offset += 1
-                await message.delete()
-                await send_leaderboard_inner(year, month, new_offset)
-                break
-            except TimeoutError:
-                break
+        await handle_month_navigation(
+            bot,
+            message,
+            month_offset,
+            lambda new_offset: send_leaderboard_inner(year, month, new_offset),
+        )
 
     await send_leaderboard_inner(year, month)
 
@@ -258,22 +289,178 @@ async def send_most_liked_stats(
     response += "Higher = more community attention, normalized so active reactors don't dominate._"
 
     message = await ctx.send(response)
-    await message.add_reaction("⬅️")
-    await message.add_reaction("➡️")
+    await handle_month_navigation(
+        bot,
+        message,
+        month_offset,
+        lambda new_offset: send_most_liked_stats(
+            ctx, year, month, new_offset, user_stats, bot, show_all
+        ),
+    )
 
-    def check(reaction, user):
-        return reaction.message.id == message.id and str(reaction.emoji) in ["⬅️", "➡️"]
 
-    while True:
-        try:
-            reaction, user = await bot.wait_for("reaction_add", timeout=60.0, check=check)
-            new_offset = month_offset
-            if str(reaction.emoji) == "⬅️":
-                new_offset -= 1
-            elif str(reaction.emoji) == "➡️":
-                new_offset += 1
-            await message.delete()
-            await send_most_liked_stats(ctx, year, month, new_offset, user_stats, bot, show_all)
-            break
-        except TimeoutError:
-            break
+def get_diversity_label(score: float) -> str:
+    """Get human-readable label for diversity score."""
+    if score >= 0.75:
+        return "High"
+    elif score >= 0.5:
+        return "Moderate"
+    elif score >= 0.25:
+        return "Low"
+    else:
+        return "Very Low"
+
+
+def get_index_label(index: int) -> str:
+    """Get human-readable label for echo chamber index."""
+    if index <= 25:
+        return "Very Diverse"
+    elif index <= 50:
+        return "Moderate"
+    elif index <= 75:
+        return "Concentrated"
+    else:
+        return "High"
+
+
+def _get_trade_status(balance: int) -> str:
+    """Get trade status string based on balance."""
+    if balance > 0:
+        return "SURPLUS"
+    elif balance < 0:
+        return "DEFICIT"
+    else:
+        return "NEUTRAL"
+
+
+def format_yearly_trade_report(trade_data: dict, display_name: str) -> str:
+    """Format a yearly (rolling 12-month) trade report.
+
+    Args:
+        trade_data: Dict with exports, imports, total_given, total_received, trade_balance
+        display_name: User's display name
+
+    Returns:
+        Formatted report string
+    """
+    report = f"**Reaction Trade Report for {display_name}**\n"
+    report += "*Data from the past 12 months*\n```\n"
+
+    report += "Top Export Partners (Reactions Given):\n"
+    if trade_data["exports"]:
+        for partner, count in trade_data["exports"]:
+            report += f"  {partner:<20} {count:>6}\n"
+    else:
+        report += "  No reactions given\n"
+
+    report += "\nTop Import Partners (Reactions Received):\n"
+    if trade_data["imports"]:
+        for partner, count in trade_data["imports"]:
+            report += f"  {partner:<20} {count:>6}\n"
+    else:
+        report += "  No reactions received\n"
+
+    report += "\nTrade Summary:\n"
+    report += f"  Total Reactions Given:    {trade_data['total_given']:>6}\n"
+    report += f"  Total Reactions Received: {trade_data['total_received']:>6}\n"
+    report += f"  Trade Balance:            {trade_data['trade_balance']:>6}\n"
+
+    status = _get_trade_status(trade_data["trade_balance"])
+    report += f"\nTrade Status: {status}```"
+
+    return report
+
+
+def format_monthly_trade_report(trade_data: dict, display_name: str, period_str: str) -> str:
+    """Format a monthly trade report.
+
+    Args:
+        trade_data: Dict with exports, imports, total_given, total_received, trade_balance
+        display_name: User's display name
+        period_str: Formatted period string (e.g., "January 2025")
+
+    Returns:
+        Formatted report string
+    """
+    report = f"**Reaction Trade Report for {display_name}**\n"
+    report += f"*{period_str}*\n```\n"
+
+    has_data = trade_data["total_given"] > 0 or trade_data["total_received"] > 0
+
+    if not has_data:
+        report += "No trading activity this month.\n"
+    else:
+        report += "Top Export Partners (Reactions Given):\n"
+        if trade_data["exports"]:
+            for partner, count in trade_data["exports"]:
+                report += f"  {partner:<20} {count:>6}\n"
+        else:
+            report += "  No reactions given\n"
+
+        report += "\nTop Import Partners (Reactions Received):\n"
+        if trade_data["imports"]:
+            for partner, count in trade_data["imports"]:
+                report += f"  {partner:<20} {count:>6}\n"
+        else:
+            report += "  No reactions received\n"
+
+        report += "\nTrade Summary:\n"
+        report += f"  Total Reactions Given:    {trade_data['total_given']:>6}\n"
+        report += f"  Total Reactions Received: {trade_data['total_received']:>6}\n"
+        report += f"  Trade Balance:            {trade_data['trade_balance']:>6}\n"
+
+        status = _get_trade_status(trade_data["trade_balance"])
+        report += f"\nTrade Status: {status}"
+
+    report += "```"
+
+    return report
+
+
+def format_connections_report(
+    affinities: list[tuple[str, str, float]], period_str: str, limit: int = 10
+) -> str:
+    """Format a connections report showing top mutual relationships.
+
+    Args:
+        affinities: List of (user_a, user_b, affinity_score) tuples, sorted by score
+        period_str: Formatted period string (e.g., "January 2025")
+        limit: Maximum number of connections to show
+
+    Returns:
+        Formatted report string
+    """
+    response = f"**Top {limit} Mutual Relationships** ({period_str})\n"
+    response += "*Mutual Affinity Score*\n```\n"
+
+    for i, (user_a, user_b, affinity) in enumerate(affinities[:limit], 1):
+        response += f"{i:2}. {user_a} <-> {user_b}: {affinity:.3f}\n"
+
+    response += "```"
+
+    return response
+
+
+def format_clusters_report(
+    sorted_groups: list[tuple[int, list[str]]], period_str: str, total_members: int
+) -> str:
+    """Format a social clusters report.
+
+    Args:
+        sorted_groups: List of (community_id, member_list) tuples, sorted by size
+        period_str: Formatted period string (e.g., "Jan 2025 - Mar 2025")
+        total_members: Total number of members across all clusters
+
+    Returns:
+        Formatted report string
+    """
+    response = f"**Social Clusters** ({period_str})\n"
+    response += f"*{len(sorted_groups)} groups, {total_members} members*\n```\n"
+
+    for comm_id, members in sorted_groups:
+        members_sorted = sorted(members)
+        response += f"Group {comm_id + 1} ({len(members)}): {', '.join(members_sorted)}\n"
+
+    response += "```"
+
+    return response

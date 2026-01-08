@@ -22,3 +22,13 @@ REACT_COUNT_THRESHOLD = 4
 IMAGE_MAX_SIZE_BYTES = 1024 * 1024  # 1 MB
 IMAGE_QUALITY_START = 80
 IMAGE_QUALITY_MIN = 30
+
+# Gemini AI configuration (free tier)
+GEMINI_MODELS = [
+    "gemini-2.5-flash",  # Primary - stable, good balance
+    "gemini-2.5-flash-lite",  # Fallback - faster, lighter
+]
+GEMINI_RPD_LIMIT = 20  # Requests per day per model
+GEMINI_MAX_CONTEXT_MESSAGES = 10
+DISCORD_MAX_MESSAGE_LENGTH = 2000
+GEMINI_USAGE_FILE = Path(__file__).parent.parent / "data" / "gemini_usage.json"
