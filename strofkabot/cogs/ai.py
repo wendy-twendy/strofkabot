@@ -1,5 +1,6 @@
 """AI commands: !ask, !predict."""
 
+import asyncio
 import datetime
 import logging
 
@@ -34,6 +35,7 @@ class AICog(commands.Cog):
         self.logger = logger
         self._gemini_client: GeminiClient | None = None
         self._openrouter_client: OpenRouterClient | None = None
+        self._ask_lock = asyncio.Lock()
 
     @property
     def openrouter_client(self) -> OpenRouterClient | None:
@@ -74,100 +76,108 @@ class AICog(commands.Cog):
         Uses OpenRouter as primary (free models), falls back to Gemini for images
         or if OpenRouter fails.
         """
-        if not question.strip():
-            await ctx.send(format_error_response("no_question"))
+        # Check if already processing a request
+        if self._ask_lock.locked():
+            await ctx.send(f"{ctx.author.mention} jam duke shkruar o kar, prit radhen")
             return
 
-        if len(question) > 20000:
-            await ctx.send(format_error_response("too_long"))
-            return
+        async with self._ask_lock:
+            if not question.strip():
+                await ctx.send(format_error_response("no_question"))
+                return
 
-        # Check if at least one client is available
-        if self.openrouter_client is None and self.gemini_client is None:
-            await ctx.send(format_error_response("config"))
-            return
+            if len(question) > 20000:
+                await ctx.send(format_error_response("too_long"))
+                return
 
-        self.logger.info(f"Ask command from {ctx.author}: {question[:50]}...")
+            # Check if at least one client is available
+            if self.openrouter_client is None and self.gemini_client is None:
+                await ctx.send(format_error_response("config"))
+                return
 
-        async with ctx.typing():
-            try:
-                messages = await fetch_context_messages(
-                    ctx.channel,
-                    exclude_message_id=ctx.message.id,
-                    limit=GEMINI_MAX_CONTEXT_MESSAGES,
-                )
+            self.logger.info(f"Ask command from {ctx.author}: {question[:50]}...")
 
-                context_dicts, images = await prepare_context(messages)
-
-                user_roles = [role.name for role in ctx.author.roles if role.name != "@everyone"]
-                system_prompt = build_system_prompt(
-                    guild_name=ctx.guild.name if ctx.guild else "Direct Message",
-                    channel_name=ctx.channel.name if hasattr(ctx.channel, "name") else "DM",
-                    user_name=ctx.author.display_name,
-                    user_roles=user_roles,
-                )
-
-                response = None
-                used_fallback = False
-
-                # Try OpenRouter first (including for images with vision model)
-                if self.openrouter_client is not None:
-                    response = await self.openrouter_client.ask_with_context(
-                        question=question,
-                        system_prompt=system_prompt,
-                        context_messages=context_dicts,
-                        images=images if images else None,
+            async with ctx.typing():
+                try:
+                    messages = await fetch_context_messages(
+                        ctx.channel,
+                        exclude_message_id=ctx.message.id,
+                        limit=GEMINI_MAX_CONTEXT_MESSAGES,
                     )
 
-                    if response.success:
-                        self.logger.info(
-                            f"OpenRouter success: model={response.model_used}, "
-                            f"search={response.search_used}, thinking={response.thinking_used}"
-                        )
-                    else:
-                        self.logger.warning(
-                            f"OpenRouter failed: {response.error_message}, falling back to Gemini"
-                        )
-                        response = None  # Try Gemini fallback
+                    context_dicts, images = await prepare_context(messages)
 
-                # Fall back to Gemini if OpenRouter failed
-                if response is None and self.gemini_client is not None:
-                    used_fallback = True
-                    response = await self.gemini_client.ask_with_context(
-                        question=question,
-                        system_prompt=system_prompt,
-                        context_messages=context_dicts,
-                        images=images if images else None,
+                    user_roles = [
+                        role.name for role in ctx.author.roles if role.name != "@everyone"
+                    ]
+                    system_prompt = build_system_prompt(
+                        guild_name=ctx.guild.name if ctx.guild else "Direct Message",
+                        channel_name=ctx.channel.name if hasattr(ctx.channel, "name") else "DM",
+                        user_name=ctx.author.display_name,
+                        user_roles=user_roles,
                     )
 
-                # No response from either client
-                if response is None:
-                    await ctx.send(format_error_response("config"))
-                    return
+                    response = None
+                    used_fallback = False
 
-                if not response.success:
-                    provider = "Gemini" if used_fallback else "OpenRouter"
-                    self.logger.error(f"{provider} error: {response.error_message}")
-                    if "Daily limit" in (response.error_message or ""):
-                        await ctx.send(format_error_response("exhausted"))
-                    elif "rate" in (response.error_message or "").lower():
-                        await ctx.send(format_error_response("rate_limit"))
-                    else:
-                        await ctx.send(format_error_response("api", response.error_message))
-                    return
+                    # Try OpenRouter first (including for images with vision model)
+                    if self.openrouter_client is not None:
+                        response = await self.openrouter_client.ask_with_context(
+                            question=question,
+                            system_prompt=system_prompt,
+                            context_messages=context_dicts,
+                            images=images if images else None,
+                        )
 
-                chunks = split_response(response.text)
-                for chunk in chunks:
-                    await ctx.send(chunk)
+                        if response.success:
+                            self.logger.info(
+                                f"OpenRouter success: model={response.model_used}, "
+                                f"search={response.search_used}, thinking={response.thinking_used}"
+                            )
+                        else:
+                            self.logger.warning(
+                                f"OpenRouter failed: {response.error_message}, falling back to Gemini"
+                            )
+                            response = None  # Try Gemini fallback
 
-                self.logger.info(
-                    f"Ask command completed for {ctx.author} using model {response.model_used}"
-                    + (" (fallback)" if used_fallback else "")
-                )
+                    # Fall back to Gemini if OpenRouter failed
+                    if response is None and self.gemini_client is not None:
+                        used_fallback = True
+                        response = await self.gemini_client.ask_with_context(
+                            question=question,
+                            system_prompt=system_prompt,
+                            context_messages=context_dicts,
+                            images=images if images else None,
+                        )
 
-            except Exception:
-                self.logger.exception("Unexpected error in ask command")
-                await ctx.send(format_error_response("api"))
+                    # No response from either client
+                    if response is None:
+                        await ctx.send(format_error_response("config"))
+                        return
+
+                    if not response.success:
+                        provider = "Gemini" if used_fallback else "OpenRouter"
+                        self.logger.error(f"{provider} error: {response.error_message}")
+                        if "Daily limit" in (response.error_message or ""):
+                            await ctx.send(format_error_response("exhausted"))
+                        elif "rate" in (response.error_message or "").lower():
+                            await ctx.send(format_error_response("rate_limit"))
+                        else:
+                            await ctx.send(format_error_response("api", response.error_message))
+                        return
+
+                    chunks = split_response(response.text)
+                    for chunk in chunks:
+                        await ctx.send(chunk)
+
+                    self.logger.info(
+                        f"Ask command completed for {ctx.author} using model {response.model_used}"
+                        + (" (fallback)" if used_fallback else "")
+                    )
+
+                except Exception:
+                    self.logger.exception("Unexpected error in ask command")
+                    await ctx.send(format_error_response("api"))
 
     @commands.command(
         name="predict",

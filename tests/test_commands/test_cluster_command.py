@@ -12,12 +12,12 @@ class TestClusterCommand:
         """Test that !cluster handles empty database gracefully."""
         bot, mock_db, mock_user_stats, cog = bot_with_mocked_db
 
-        mock_user_stats.get_reaction_network_rolling.return_value = []
+        mock_user_stats.get_reply_network_for_months.return_value = []
 
         await dpytest.message("!cluster")
         msg = dpytest.get_message()
         assert msg is not None
-        assert "No reaction data available" in msg.content
+        assert "No reply data available" in msg.content
 
     @pytest.mark.asyncio
     async def test_cluster_validates_months_min(self, bot_with_mocked_db):
@@ -40,20 +40,20 @@ class TestClusterCommand:
         """Test that !cluster calls the user_stats method."""
         bot, mock_db, mock_user_stats, cog = bot_with_mocked_db
 
-        mock_user_stats.get_reaction_network_rolling.return_value = []
+        mock_user_stats.get_reply_network_for_months.return_value = []
 
         await dpytest.message("!cluster")
-        mock_user_stats.get_reaction_network_rolling.assert_called_once()
+        mock_user_stats.get_reply_network_for_months.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_cluster_with_custom_months(self, bot_with_mocked_db):
         """Test that !cluster accepts custom months parameter."""
         bot, mock_db, mock_user_stats, cog = bot_with_mocked_db
 
-        mock_user_stats.get_reaction_network_rolling.return_value = []
+        mock_user_stats.get_reply_network_for_months.return_value = []
 
         await dpytest.message("!cluster 3")
-        mock_user_stats.get_reaction_network_rolling.assert_called_once()
+        mock_user_stats.get_reply_network_for_months.assert_called_once()
 
     @pytest.mark.asyncio
     async def test_cluster_generates_text_output_with_data(self, bot_with_mocked_db):
@@ -61,7 +61,7 @@ class TestClusterCommand:
         bot, mock_db, mock_user_stats, cog = bot_with_mocked_db
 
         # Bidirectional edges with count >= 9 (3 months * 3 per month)
-        mock_user_stats.get_reaction_network_rolling.return_value = [
+        mock_user_stats.get_reply_network_for_months.return_value = [
             ("Alice", "Bob", 15),
             ("Bob", "Alice", 15),
             ("Charlie", "Diana", 12),
@@ -81,7 +81,7 @@ class TestClusterCommand:
         bot, mock_db, mock_user_stats, cog = bot_with_mocked_db
 
         # Bidirectional edges with count >= 9 (3 months * 3 per month)
-        mock_user_stats.get_reaction_network_rolling.return_value = [
+        mock_user_stats.get_reply_network_for_months.return_value = [
             ("Alice", "Bob", 15),
             ("Bob", "Alice", 15),
         ]

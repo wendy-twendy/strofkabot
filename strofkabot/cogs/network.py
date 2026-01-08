@@ -221,21 +221,29 @@ class NetworkCog(commands.Cog):
                 f"Generating clusters for {months} month(s) with offset {month_offset}"
             )
 
-            # Calculate rolling window: start from (current - 1 + offset) and go back months
+            # Calculate the months to include
             now = datetime.datetime.now(datetime.UTC)
             # End month is previous month + offset
             end_year, end_month = adjust_month(now.year, now.month, -1 + month_offset)
             # Start month is end month - (months - 1)
             start_year, start_month = adjust_month(end_year, end_month, -(months - 1))
 
-            # Fetch data
-            reaction_data = await self.user_stats.get_reaction_network_rolling(
-                start_year, start_month
-            )
+            # Build list of (year, month) tuples for the range
+            year_months = []
+            y, m = start_year, start_month
+            for _ in range(months):
+                year_months.append((y, m))
+                m += 1
+                if m > 12:
+                    m = 1
+                    y += 1
 
-            if not reaction_data:
+            # Fetch reply network data
+            reply_data = await self.user_stats.get_reply_network_for_months(year_months)
+
+            if not reply_data:
                 period_str = format_period_string(start_year, start_month, months)
-                await ctx.send(f"No reaction data available for {period_str}.")
+                await ctx.send(f"No reply data available for {period_str}.")
                 return
 
             # Filter edges: min weight = 3 per month, bidirectional only
@@ -243,9 +251,9 @@ class NetworkCog(commands.Cog):
 
             # Build edge dict with min weight filter
             edges: dict[tuple[str, str], int] = {}
-            for giver, receiver, count in reaction_data:
+            for replier, replied_to, count in reply_data:
                 if count >= min_edge_weight:
-                    edges[(giver, receiver)] = count
+                    edges[(replier, replied_to)] = count
 
             # Keep only bidirectional edges (both A->B and B->A must exist)
             bidirectional_data: list[tuple[str, str, int]] = []

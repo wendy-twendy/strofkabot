@@ -145,6 +145,7 @@ class BackgroundTaskManager:
         attachments_to_insert = []
         stats_to_update = []
         reactions_to_update = []
+        replies_to_update = []
         total_message_count = 0
         total_reaction_count = 0
         last_message_time = last_scanned  # Start from last scanned, not scan_until
@@ -160,6 +161,18 @@ class BackgroundTaskManager:
                 last_message_id = message.id
                 reaction_count = self._get_all_reacts(message)
                 reply_info = get_reply_info(message)
+                replied_to_author_id = reply_info[3]
+
+                # Collect reply stats if this message is a reply to someone else
+                if replied_to_author_id and message.author.id != replied_to_author_id:
+                    replies_to_update.append(
+                        (
+                            message.author.id,
+                            replied_to_author_id,
+                            message.created_at.year,
+                            message.created_at.month,
+                        )
+                    )
 
                 # Record ALL messages to message history (unfiltered, for AI purposes)
                 history_messages_to_insert.append(
@@ -200,6 +213,11 @@ class BackgroundTaskManager:
                 if len(reactions_to_update) >= 100:
                     await self.user_stats.batch_update_reaction_stats(reactions_to_update)
                     reactions_to_update.clear()
+
+                # Batch replies at the same threshold
+                if len(replies_to_update) >= 100:
+                    await self.db.batch_upsert_reply_stats(replies_to_update)
+                    replies_to_update.clear()
 
                 # Process attachments and quality messages for high-reaction content
                 if reaction_count >= self.react_count_threshold:
@@ -274,6 +292,8 @@ class BackgroundTaskManager:
                 await self.user_stats.batch_update_stats(stats_to_update)
             if reactions_to_update:
                 await self.user_stats.batch_update_reaction_stats(reactions_to_update)
+            if replies_to_update:
+                await self.db.batch_upsert_reply_stats(replies_to_update)
         except Exception:
             self.logger.exception(f"Error committing remaining batches for channel {channel.name}")
 

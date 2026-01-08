@@ -322,11 +322,14 @@ class TestGetReplyInfo:
         mock_message = MagicMock(spec=discord.Message)
         mock_message.reference = None
 
-        reply_to_id, reply_to_author, reply_to_content = get_reply_info(mock_message)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(
+            mock_message
+        )
 
         assert reply_to_id is None
         assert reply_to_author is None
         assert reply_to_content is None
+        assert reply_to_author_id is None
 
     def test_unresolved_reference(self):
         """Test message with reference but unresolved returns all None."""
@@ -334,11 +337,14 @@ class TestGetReplyInfo:
         mock_message.reference = MagicMock()
         mock_message.reference.resolved = None
 
-        reply_to_id, reply_to_author, reply_to_content = get_reply_info(mock_message)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(
+            mock_message
+        )
 
         assert reply_to_id is None
         assert reply_to_author is None
         assert reply_to_content is None
+        assert reply_to_author_id is None
 
     def test_normal_reply(self):
         """Test message replying to a normal message."""
@@ -347,16 +353,20 @@ class TestGetReplyInfo:
         mock_replied.id = 12345
         mock_replied.author = MagicMock()
         mock_replied.author.display_name = "TestUser"
+        mock_replied.author.id = 67890
         mock_replied.content = "Original message content"
 
         mock_message.reference = MagicMock()
         mock_message.reference.resolved = mock_replied
 
-        reply_to_id, reply_to_author, reply_to_content = get_reply_info(mock_message)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(
+            mock_message
+        )
 
         assert reply_to_id == 12345
         assert reply_to_author == "TestUser"
         assert reply_to_content == "Original message content"
+        assert reply_to_author_id == 67890
 
     @pytest.mark.xfail(
         reason="DeletedReferencedMessage requires complex mocking - verified manually"
@@ -378,11 +388,14 @@ class TestGetReplyInfo:
         mock_message.reference = MagicMock()
         mock_message.reference.resolved = mock_deleted
 
-        reply_to_id, reply_to_author, reply_to_content = get_reply_info(mock_message)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(
+            mock_message
+        )
 
         assert reply_to_id == 99999
         assert reply_to_author == "Deleted User"
         assert reply_to_content == "Message was deleted"
+        assert reply_to_author_id is None
 
     def test_missing_author(self):
         """Test message where author is None falls back to Unknown User."""
@@ -395,11 +408,14 @@ class TestGetReplyInfo:
         mock_message.reference = MagicMock()
         mock_message.reference.resolved = mock_replied
 
-        reply_to_id, reply_to_author, reply_to_content = get_reply_info(mock_message)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(
+            mock_message
+        )
 
         assert reply_to_id == 12345
         assert reply_to_author == "Unknown User"
         assert reply_to_content == "Some content"
+        assert reply_to_author_id is None
 
     def test_missing_content_attribute(self):
         """Test message where content attribute is missing."""
@@ -408,17 +424,21 @@ class TestGetReplyInfo:
         mock_replied.id = 12345
         mock_replied.author = MagicMock()
         mock_replied.author.display_name = "TestUser"
+        mock_replied.author.id = 67890
         # Remove content attribute
         del mock_replied.content
 
         mock_message.reference = MagicMock()
         mock_message.reference.resolved = mock_replied
 
-        reply_to_id, reply_to_author, reply_to_content = get_reply_info(mock_message)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(
+            mock_message
+        )
 
         assert reply_to_id == 12345
         assert reply_to_author == "TestUser"
         assert reply_to_content == "Content unavailable"
+        assert reply_to_author_id == 67890
 
 
 class TestGetNonBotMemberIds:

@@ -103,6 +103,15 @@ class Database:
                 PRIMARY KEY (giver_id, receiver_id, year, month)
             );
 
+            CREATE TABLE IF NOT EXISTS user_replies_monthly (
+                replier_id INTEGER,
+                replied_to_id INTEGER,
+                year INTEGER,
+                month INTEGER,
+                reply_count INTEGER,
+                PRIMARY KEY (replier_id, replied_to_id, year, month)
+            );
+
             CREATE TABLE IF NOT EXISTS attachments (
                 id INTEGER PRIMARY KEY,
                 message_id INTEGER,
@@ -286,6 +295,20 @@ class Database:
             VALUES (?, ?, ?, ?, 1)
             ON CONFLICT(giver_id, receiver_id, year, month) DO UPDATE SET
                 reaction_count = reaction_count + 1
+        """,
+            stats,
+        ):
+            await self.conn.commit()
+
+    async def batch_upsert_reply_stats(self, stats: list[tuple[int, int, int, int]]):
+        """Batch insert/update reply stats. Each tuple: (replier_id, replied_to_id, year, month)."""
+        await self.ensure_connection()
+        async with self.conn.executemany(
+            """
+            INSERT INTO user_replies_monthly (replier_id, replied_to_id, year, month, reply_count)
+            VALUES (?, ?, ?, ?, 1)
+            ON CONFLICT(replier_id, replied_to_id, year, month) DO UPDATE SET
+                reply_count = reply_count + 1
         """,
             stats,
         ):
@@ -588,6 +611,41 @@ class Database:
             GROUP BY urm.giver_id, urm.receiver_id
         """
         async with self.conn.execute(query, (start_year, start_year, start_month)) as cursor:
+            return await cursor.fetchall()
+
+    async def fetch_reply_network_for_months(
+        self, year_months: list[tuple[int, int]]
+    ) -> list[tuple]:
+        """Fetch aggregated reply data for specific months.
+
+        Args:
+            year_months: List of (year, month) tuples to include.
+
+        Returns:
+            List of (replier_username, replied_to_username, total_reply_count) tuples.
+        """
+        if not year_months:
+            return []
+
+        await self.ensure_connection()
+
+        # Build WHERE clause for year/month pairs
+        conditions = " OR ".join(["(urm.year = ? AND urm.month = ?)"] * len(year_months))
+        params = [v for ym in year_months for v in ym]
+
+        query = f"""
+            SELECT
+                um_replier.username AS replier_username,
+                um_replied.username AS replied_to_username,
+                SUM(urm.reply_count) AS total_replies
+            FROM user_replies_monthly urm
+            JOIN user_mapping um_replier ON urm.replier_id = um_replier.author_id
+            JOIN user_mapping um_replied ON urm.replied_to_id = um_replied.author_id
+            WHERE ({conditions})
+              AND urm.replier_id != urm.replied_to_id
+            GROUP BY urm.replier_id, urm.replied_to_id
+        """
+        async with self.conn.execute(query, params) as cursor:
             return await cursor.fetchall()
 
     async def fetch_user_reaction_distribution_rolling(

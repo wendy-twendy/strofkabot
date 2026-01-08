@@ -251,6 +251,21 @@ class UserStats:
         rows = await self.db.fetch_reaction_network_rolling(start_year, start_month)
         return [(row[0], row[1], row[2]) for row in rows]
 
+    async def get_reply_network_for_months(
+        self, year_months: list[tuple[int, int]]
+    ) -> list[tuple[str, str, int]]:
+        """Get reply network for specific months.
+
+        Args:
+            year_months: List of (year, month) tuples to include.
+
+        Returns:
+            List of (replier_username, replied_to_username, reply_count) tuples.
+        """
+        self.logger.info(f"Fetching reply network for {len(year_months)} months")
+        rows = await self.db.fetch_reply_network_for_months(year_months)
+        return [(row[0], row[1], row[2]) for row in rows]
+
     async def get_echo_chamber_data(self, user_id: int, start_year: int, start_month: int) -> dict:
         """Get reaction distribution data for echo chamber analysis.
 
