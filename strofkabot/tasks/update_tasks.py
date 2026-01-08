@@ -414,8 +414,7 @@ class BackgroundTaskManager:
 
         # Build embed
         embed = discord.Embed(
-            title="Prediction Day!",
-            description=prediction.prediction_text,
+            description=f"**{prediction.prediction_text}**",
             color=discord.Color.gold(),
         )
 
