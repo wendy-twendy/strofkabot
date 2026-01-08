@@ -1,13 +1,42 @@
 """Tests for ask helper functions."""
 
+import re
+from datetime import UTC, datetime
+
 import pytest
 
+from strofkabot.openrouter_client import QueryMetadata
 from strofkabot.utils.ask_helpers import (
     build_system_prompt,
     format_error_response,
     is_image_attachment,
     split_response,
 )
+
+
+def make_metadata(
+    search: bool = False,
+    thinking: bool = False,
+    reasoning_effort: str = "medium",
+    query_type: str = "factual",
+    key_topics: list[str] | None = None,
+    suggested_response_style: str = "conversational",
+    language: str = "en",
+    requires_citations: bool = False,
+    is_followup: bool = False,
+) -> QueryMetadata:
+    """Create a QueryMetadata instance with defaults."""
+    return QueryMetadata(
+        search=search,
+        thinking=thinking,
+        reasoning_effort=reasoning_effort,
+        query_type=query_type,
+        key_topics=key_topics or [],
+        suggested_response_style=suggested_response_style,
+        language=language,
+        requires_citations=requires_citations,
+        is_followup=is_followup,
+    )
 
 
 class TestBuildSystemPrompt:
@@ -19,7 +48,6 @@ class TestBuildSystemPrompt:
             guild_name="Test Server",
             channel_name="general",
             user_name="TestUser",
-            user_roles=["Member"],
         )
         assert "Test Server" in prompt
 
@@ -29,7 +57,6 @@ class TestBuildSystemPrompt:
             guild_name="Server",
             channel_name="test-channel",
             user_name="User",
-            user_roles=[],
         )
         assert "#test-channel" in prompt
 
@@ -39,42 +66,8 @@ class TestBuildSystemPrompt:
             guild_name="Server",
             channel_name="general",
             user_name="CoolUser123",
-            user_roles=[],
         )
         assert "CoolUser123" in prompt
-
-    def test_handles_empty_roles(self):
-        """Test fallback to 'Member' when no roles provided."""
-        prompt = build_system_prompt(
-            guild_name="Server",
-            channel_name="general",
-            user_name="User",
-            user_roles=[],
-        )
-        assert "Member" in prompt
-
-    def test_includes_roles(self):
-        """Test that roles are included."""
-        prompt = build_system_prompt(
-            guild_name="Server",
-            channel_name="general",
-            user_name="User",
-            user_roles=["Admin", "Moderator"],
-        )
-        assert "Admin" in prompt
-        assert "Moderator" in prompt
-
-    def test_limits_roles_to_five(self):
-        """Test that only first 5 roles are included."""
-        roles = ["Role1", "Role2", "Role3", "Role4", "Role5", "Role6", "Role7"]
-        prompt = build_system_prompt(
-            guild_name="Server",
-            channel_name="general",
-            user_name="User",
-            user_roles=roles,
-        )
-        assert "Role5" in prompt
-        assert "Role6" not in prompt
 
     def test_contains_key_instructions(self):
         """Test that key instructions are present."""
@@ -82,11 +75,10 @@ class TestBuildSystemPrompt:
             guild_name="Server",
             channel_name="general",
             user_name="User",
-            user_roles=[],
         )
         assert "helpful" in prompt.lower()
         assert "discord" in prompt.lower()
-        assert "google search" in prompt.lower()
+        assert "concise" in prompt.lower()
 
 
 class TestSplitResponse:
@@ -220,3 +212,180 @@ class TestIsImageAttachment:
         assert is_image_attachment("IMAGE.PNG") is True
         assert is_image_attachment("Photo.JpG") is True
         assert is_image_attachment("pic.GIF") is True
+
+
+class TestBuildSystemPromptDateTime:
+    """Tests for date/time inclusion in system prompt."""
+
+    def test_includes_current_date(self):
+        """Test that current date is included in prompt."""
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+        )
+        # Should contain the current year
+        today = datetime.now(UTC)
+        assert str(today.year) in prompt
+
+    def test_includes_utc_time_indicator(self):
+        """Test that UTC time indicator is included in prompt."""
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+        )
+        # Should contain UTC indicator or time format
+        assert "UTC" in prompt or re.search(r"\d{1,2}:\d{2}", prompt)
+
+
+class TestBuildSystemPromptWithMetadata:
+    """Tests for system prompt with QueryMetadata."""
+
+    def test_technical_query_type_adds_instructions(self):
+        """Test that technical query type adds specific instructions."""
+        metadata = make_metadata(query_type="technical")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        # Should contain technical-specific guidance
+        assert "technical" in prompt.lower() or "code" in prompt.lower()
+
+    def test_creative_query_type_adds_instructions(self):
+        """Test that creative query type adds specific instructions."""
+        metadata = make_metadata(query_type="creative")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        assert "creative" in prompt.lower() or "imaginative" in prompt.lower()
+
+    def test_factual_query_type_adds_instructions(self):
+        """Test that factual query type adds specific instructions."""
+        metadata = make_metadata(query_type="factual")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        assert "factual" in prompt.lower() or "accurate" in prompt.lower()
+
+    def test_brief_style_adds_instructions(self):
+        """Test that brief response style adds instructions."""
+        metadata = make_metadata(suggested_response_style="brief")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        assert (
+            "brief" in prompt.lower() or "concise" in prompt.lower() or "direct" in prompt.lower()
+        )
+
+    def test_detailed_style_adds_instructions(self):
+        """Test that detailed response style adds instructions."""
+        metadata = make_metadata(suggested_response_style="detailed")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        assert "detailed" in prompt.lower() or "thorough" in prompt.lower()
+
+    def test_sarcastic_style_adds_instructions(self):
+        """Test that sarcastic response style adds instructions."""
+        metadata = make_metadata(suggested_response_style="sarcastic")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        assert (
+            "sarcastic" in prompt.lower() or "witty" in prompt.lower() or "humor" in prompt.lower()
+        )
+
+    def test_key_topics_included(self):
+        """Test that key topics are included in prompt."""
+        metadata = make_metadata(key_topics=["Python", "async"])
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        assert "Python" in prompt
+        assert "async" in prompt
+
+    def test_is_followup_adds_hint(self):
+        """Test that is_followup adds context hint to prompt."""
+        metadata = make_metadata(is_followup=True)
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        assert "follow-up" in prompt.lower() or "previous" in prompt.lower()
+
+
+class TestBuildSystemPromptLanguage:
+    """Tests for language handling in system prompt."""
+
+    def test_english_language_no_extra_instruction(self):
+        """Test that English doesn't add extra language instruction."""
+        metadata = make_metadata(language="en")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        # Should not have explicit "respond in en" instruction
+        assert "respond in en" not in prompt.lower()
+
+    def test_non_english_language_adds_instruction(self):
+        """Test that non-English language adds instruction."""
+        metadata = make_metadata(language="sr")
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=metadata,
+        )
+        # Should have instruction to respond in that language
+        assert "sr" in prompt.lower() or "language" in prompt.lower()
+
+
+class TestBuildSystemPromptWithoutMetadata:
+    """Tests for system prompt when metadata is None."""
+
+    def test_works_without_metadata(self):
+        """Test that prompt builds successfully without metadata."""
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=None,
+        )
+        assert len(prompt) > 0
+        assert "Test" in prompt
+
+    def test_still_includes_datetime_without_metadata(self):
+        """Test that date/time is included even without metadata."""
+        prompt = build_system_prompt(
+            guild_name="Test",
+            channel_name="general",
+            user_name="User",
+            query_metadata=None,
+        )
+        today = datetime.now(UTC)
+        assert str(today.year) in prompt

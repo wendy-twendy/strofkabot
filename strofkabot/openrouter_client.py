@@ -17,6 +17,21 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class QueryMetadata:
+    """Rich metadata from query classification."""
+
+    search: bool
+    thinking: bool
+    reasoning_effort: str  # minimal, low, medium, high, xhigh
+    query_type: str  # factual, creative, technical, opinion, comparison
+    key_topics: list[str]
+    suggested_response_style: str  # brief, detailed, step-by-step, conversational, sarcastic
+    language: str  # ISO 639-1 code
+    requires_citations: bool
+    is_followup: bool  # Is this a follow-up to previous messages?
+
+
+@dataclass
 class OpenRouterResponse:
     """Structured response from OpenRouter API."""
 
@@ -26,6 +41,7 @@ class OpenRouterResponse:
     model_used: str | None = None
     search_used: bool = False
     thinking_used: bool = False
+    metadata: QueryMetadata | None = None
 
 
 class OpenRouterClient:
@@ -44,7 +60,24 @@ class OpenRouterClient:
         self._client = AsyncOpenAI(
             base_url="https://openrouter.ai/api/v1",
             api_key=api_key,
+            timeout=60.0,  # 60 second timeout to prevent hanging
         )
+
+    async def classify_query(
+        self,
+        question: str,
+        context_messages: list[dict] | None = None,
+    ) -> QueryMetadata:
+        """Classify a query to get rich metadata for the main model.
+
+        Args:
+            question: The user's question.
+            context_messages: Optional list of context message dicts.
+
+        Returns:
+            QueryMetadata with classification results.
+        """
+        return await self._classify_query(question, context_messages or [])
 
     async def ask_with_context(
         self,
@@ -52,6 +85,8 @@ class OpenRouterClient:
         system_prompt: str,
         context_messages: list[dict],
         images: list[dict] | None = None,
+        query_metadata: QueryMetadata | None = None,
+        url_context: str | None = None,
     ) -> OpenRouterResponse:
         """Send a question to OpenRouter with conversation context.
 
@@ -60,38 +95,53 @@ class OpenRouterClient:
             system_prompt: Discord-aware system instructions.
             context_messages: List of context message dicts with author, content, etc.
             images: Optional list of image dicts with data (base64) and mime_type.
+            query_metadata: Optional pre-computed metadata (skips classification).
+            url_context: Optional extracted URL content to include in context.
 
         Returns:
             OpenRouterResponse with the model's answer or error details.
         """
         try:
-            # Use vision model for images, otherwise detect search/thinking needs
+            # Use vision model for images, otherwise use classification
             if images:
                 model = OPENROUTER_VISION_MODEL
-                needs_search = False
-                needs_thinking = False
+                metadata = query_metadata or QueryMetadata(
+                    search=False,
+                    thinking=False,
+                    reasoning_effort="medium",
+                    query_type="factual",
+                    key_topics=[],
+                    suggested_response_style="conversational",
+                    language="en",
+                    requires_citations=False,
+                    is_followup=False,
+                )
             else:
-                needs_search, needs_thinking = await self._detect_query_requirements(question)
+                metadata = query_metadata or await self._classify_query(question, context_messages)
                 model = OPENROUTER_INFERENCE_MODEL
-                if needs_search:
+                if metadata.search:
                     model = f"{model}:online"
 
             # Build messages in OpenAI format
-            messages = self._build_messages(question, system_prompt, context_messages, images)
+            messages = self._build_messages(
+                question, system_prompt, context_messages, images, url_context
+            )
 
             # Build extra_body for reasoning
             extra_body = {
                 "HTTP-Referer": "https://github.com/strofkabot",
                 "X-Title": "StrofkaBot",
             }
-            if needs_thinking:
-                extra_body["reasoning"] = {"effort": "high"}
+            if metadata.thinking:
+                extra_body["reasoning"] = {"effort": metadata.reasoning_effort}
 
             logger.info(
-                "OpenRouter request: model=%s, search=%s, thinking=%s",
+                "OpenRouter request: model=%s, search=%s, thinking=%s, effort=%s, type=%s",
                 model,
-                needs_search,
-                needs_thinking,
+                metadata.search,
+                metadata.thinking,
+                metadata.reasoning_effort,
+                metadata.query_type,
             )
 
             response = await self._client.chat.completions.create(
@@ -108,8 +158,9 @@ class OpenRouterClient:
                     text=text,
                     success=True,
                     model_used=model,
-                    search_used=needs_search,
-                    thinking_used=needs_thinking,
+                    search_used=metadata.search,
+                    thinking_used=metadata.thinking,
+                    metadata=metadata,
                 )
             else:
                 return OpenRouterResponse(
@@ -117,6 +168,7 @@ class OpenRouterClient:
                     success=False,
                     error_message="No text response from model",
                     model_used=model,
+                    metadata=metadata,
                 )
 
         except Exception as e:
@@ -127,57 +179,124 @@ class OpenRouterClient:
                 error_message=str(e),
             )
 
-    async def _detect_query_requirements(
+    async def _classify_query(
         self,
         question: str,
-    ) -> tuple[bool, bool]:
-        """Use a fast model to detect if search and/or thinking are needed.
+        context_messages: list[dict],
+    ) -> QueryMetadata:
+        """Use a fast model to classify the query with rich metadata.
+
+        Args:
+            question: The user's question.
+            context_messages: List of context message dicts for better classification.
 
         Returns:
-            Tuple of (needs_search, needs_thinking).
+            QueryMetadata with classification results.
         """
-        classification_prompt = """You are a query classifier. Analyze the question and output JSON with two boolean fields.
+        # Build context summary for the classifier
+        context_summary = ""
+        if context_messages:
+            recent = context_messages[-5:]  # Last 5 messages
+            context_lines = []
+            for msg in recent:
+                author = msg.get("author", "Unknown")
+                content = msg.get("content", "")[:100]
+                context_lines.append(f"{author}: {content}")
+            context_summary = "\n".join(context_lines)
 
-SEARCH (true/false): Does this need CURRENT or RECENT information?
-- true: news, current events, prices, weather, "latest", "today", "now", "recent", "this week"
-- false: general knowledge, math, logic, history, programming, static facts
+        classification_prompt = """You are a query analyzer. Analyze the question with its conversation context and output JSON.
 
-THINKING (true/false): Does this need COMPLEX REASONING or analysis?
-- true: logic puzzles, multi-step problems, "why", "implications", "analyze", comparisons
-- false: simple facts, definitions, "what is X", straightforward answers
+CONTEXT ANALYSIS:
+- What language is the user speaking?
+- Are there images/videos being referenced?
+- Is this a follow-up to previous messages?
 
-Output ONLY valid JSON: {"search": true/false, "thinking": true/false}"""
+QUERY CLASSIFICATION:
+1. search (bool): Needs current/recent information? (news, prices, events, unfamiliar people, "latest", "today")
+2. thinking (bool): Needs multi-step reasoning? (math, logic, "why", "analyze", comparisons)
+3. reasoning_effort: How much thinking is needed?
+   - "minimal": Simple facts, definitions
+   - "low": Straightforward questions
+   - "medium": Some analysis needed
+   - "high": Complex reasoning, multiple factors
+   - "xhigh": Deep analysis, proofs, complex math
+4. query_type: Main category
+   - "factual": Verifiable facts
+   - "creative": Writing, ideas, brainstorming
+   - "technical": Code, debugging, how-to
+   - "opinion": Subjective advice
+   - "comparison": Comparing options
+5. key_topics: 2-3 main topics/entities mentioned (array of strings)
+6. suggested_response_style:
+   - "brief": Quick answer sufficient
+   - "detailed": Thorough explanation needed
+   - "step-by-step": Process/tutorial format
+   - "conversational": Friendly chat style
+   - "sarcastic": User is joking or being sarcastic, match their energy
+7. language: ISO 639-1 code of user's quesion language (e.g., "en", "sr", "es")
+8. requires_citations: true if factual claims need sources
+9. is_followup (bool): Is this a follow-up or continuation of previous conversation?
+   - true: References previous messages ("what about...", "and the other one?", "can you explain more?", uses "it/that/this")
+   - false: New standalone question
+
+Output ONLY valid JSON with all fields."""
+
+        user_content = f"Question: {question}"
+        if context_summary:
+            user_content = f"Recent conversation:\n{context_summary}\n\nQuestion: {question}"
 
         try:
             response = await self._client.chat.completions.create(
                 model=OPENROUTER_ROUTER_MODEL,
                 messages=[
                     {"role": "system", "content": classification_prompt},
-                    {"role": "user", "content": question},
+                    {"role": "user", "content": user_content},
                 ],
                 temperature=0.1,
-                max_tokens=50,
+                max_tokens=500,
                 response_format={"type": "json_object"},
             )
 
             content = response.choices[0].message.content.strip()
             result = json.loads(content)
 
-            needs_search = result.get("search", False)
-            needs_thinking = result.get("thinking", False)
-
-            logger.debug(
-                "Router (%s): search=%s, thinking=%s",
-                OPENROUTER_ROUTER_MODEL,
-                needs_search,
-                needs_thinking,
+            metadata = QueryMetadata(
+                search=result.get("search", False),
+                thinking=result.get("thinking", False),
+                reasoning_effort=result.get("reasoning_effort", "medium"),
+                query_type=result.get("query_type", "factual"),
+                key_topics=result.get("key_topics", []),
+                suggested_response_style=result.get("suggested_response_style", "conversational"),
+                language=result.get("language", "en"),
+                requires_citations=result.get("requires_citations", False),
+                is_followup=result.get("is_followup", False),
             )
 
-            return needs_search, needs_thinking
+            logger.debug(
+                "Router (%s): search=%s, thinking=%s, type=%s, style=%s, followup=%s",
+                OPENROUTER_ROUTER_MODEL,
+                metadata.search,
+                metadata.thinking,
+                metadata.query_type,
+                metadata.suggested_response_style,
+                metadata.is_followup,
+            )
+
+            return metadata
 
         except Exception as e:
-            logger.warning("Router failed (%s), defaulting to no search/thinking", e)
-            return False, False
+            logger.warning("Router failed (%s), using default metadata", e)
+            return QueryMetadata(
+                search=False,
+                thinking=False,
+                reasoning_effort="medium",
+                query_type="factual",
+                key_topics=[],
+                suggested_response_style="conversational",
+                language="en",
+                requires_citations=False,
+                is_followup=False,
+            )
 
     def _build_messages(
         self,
@@ -185,13 +304,19 @@ Output ONLY valid JSON: {"search": true/false, "thinking": true/false}"""
         system_prompt: str,
         context_messages: list[dict],
         images: list[dict] | None = None,
+        url_context: str | None = None,
     ) -> list[dict]:
         """Build the messages list for the OpenAI-compatible API."""
         messages = [{"role": "system", "content": system_prompt}]
 
         # Add context if provided
-        if context_messages:
-            context_text = self._format_context(context_messages)
+        if context_messages or url_context:
+            context_parts = []
+            if context_messages:
+                context_parts.append(self._format_context(context_messages))
+            if url_context:
+                context_parts.append(url_context)
+            context_text = "\n\n".join(context_parts)
             messages.append({"role": "user", "content": context_text})
             messages.append(
                 {
@@ -214,21 +339,26 @@ Output ONLY valid JSON: {"search": true/false, "thinking": true/false}"""
         return messages
 
     def _format_context(self, context_messages: list[dict]) -> str:
-        """Format context messages into a single text block for the prompt."""
-        parts = ["Recent conversation history:"]
+        """Format context messages into structured XML for the prompt."""
+        parts = ["<conversation>"]
 
         for msg in context_messages:
             author = msg.get("author", "Unknown")
             content = msg.get("content", "")
             timestamp = msg.get("timestamp", "")
-
-            reply_info = ""
-            if msg.get("reply_to_author"):
-                reply_info = f" (replying to {msg['reply_to_author']})"
-
+            reply_to = msg.get("reply_to_author")
             image_count = msg.get("image_count", 0)
-            image_info = f" [+{image_count} image(s)]" if image_count > 0 else ""
 
-            parts.append(f"[{timestamp}] {author}{reply_info}: {content}{image_info}")
+            # Build message attributes
+            attrs = [f'author="{author}"', f'time="{timestamp}"']
+            if reply_to:
+                attrs.append(f'replying_to="{reply_to}"')
+            if image_count > 0:
+                attrs.append(f'images="{image_count}"')
 
+            parts.append(f"  <message {' '.join(attrs)}>")
+            parts.append(f"    {content}")
+            parts.append("  </message>")
+
+        parts.append("</conversation>")
         return "\n".join(parts)

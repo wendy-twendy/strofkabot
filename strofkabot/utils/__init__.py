@@ -2,6 +2,7 @@
 
 from strofkabot.utils.ask_helpers import (
     build_system_prompt,
+    extract_images_from_messages,
     fetch_context_messages,
     format_error_response,
     prepare_context,
@@ -70,6 +71,7 @@ from strofkabot.utils.visualization import (
 __all__ = [
     # Ask helpers
     "build_system_prompt",
+    "extract_images_from_messages",
     "fetch_context_messages",
     "format_error_response",
     "prepare_context",

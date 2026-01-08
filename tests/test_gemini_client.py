@@ -142,7 +142,7 @@ class TestGeminiClient:
     @pytest.mark.asyncio
     async def test_ask_with_context_success(self, tmp_path: Path):
         """Test successful API call."""
-        from strofkabot.gemini_client import GeminiClient
+        from strofkabot.gemini_client import GeminiClient, GeminiUsageTracker
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
             with patch("google.genai.Client") as mock_client_class:
@@ -153,24 +153,21 @@ class TestGeminiClient:
                 mock_response.text = "Test response"
                 mock_client.models.generate_content.return_value = mock_response
 
-                with patch(
-                    "strofkabot.gemini_client.GEMINI_USAGE_FILE",
-                    tmp_path / "usage.json",
-                ):
-                    client = GeminiClient()
-                    response = await client.ask_with_context(
-                        question="Test question",
-                        system_prompt="Test prompt",
-                        context_messages=[],
-                    )
+                client = GeminiClient()
+                client._usage_tracker = GeminiUsageTracker(usage_file=tmp_path / "usage.json")
+                response = await client.ask_with_context(
+                    question="Test question",
+                    system_prompt="Test prompt",
+                    context_messages=[],
+                )
 
-                    assert response.success is True
-                    assert response.text == "Test response"
+                assert response.success is True
+                assert response.text == "Test response"
 
     @pytest.mark.asyncio
     async def test_ask_with_context_api_error(self, tmp_path: Path):
         """Test API error handling."""
-        from strofkabot.gemini_client import GeminiClient
+        from strofkabot.gemini_client import GeminiClient, GeminiUsageTracker
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
             with patch("google.genai.Client") as mock_client_class:
@@ -178,24 +175,21 @@ class TestGeminiClient:
                 mock_client_class.return_value = mock_client
                 mock_client.models.generate_content.side_effect = Exception("API Error")
 
-                with patch(
-                    "strofkabot.gemini_client.GEMINI_USAGE_FILE",
-                    tmp_path / "usage.json",
-                ):
-                    client = GeminiClient()
-                    response = await client.ask_with_context(
-                        question="Test",
-                        system_prompt="Test",
-                        context_messages=[],
-                    )
+                client = GeminiClient()
+                client._usage_tracker = GeminiUsageTracker(usage_file=tmp_path / "usage.json")
+                response = await client.ask_with_context(
+                    question="Test",
+                    system_prompt="Test",
+                    context_messages=[],
+                )
 
-                    assert response.success is False
-                    assert "API Error" in response.error_message
+                assert response.success is False
+                assert "API Error" in response.error_message
 
     @pytest.mark.asyncio
     async def test_ask_with_context_no_text_output(self, tmp_path: Path):
         """Test handling when API returns no text output."""
-        from strofkabot.gemini_client import GeminiClient
+        from strofkabot.gemini_client import GeminiClient, GeminiUsageTracker
 
         with patch.dict("os.environ", {"GEMINI_API_KEY": "test-key"}):
             with patch("google.genai.Client") as mock_client_class:
@@ -206,19 +200,16 @@ class TestGeminiClient:
                 mock_response.text = None  # No text in response
                 mock_client.models.generate_content.return_value = mock_response
 
-                with patch(
-                    "strofkabot.gemini_client.GEMINI_USAGE_FILE",
-                    tmp_path / "usage.json",
-                ):
-                    client = GeminiClient()
-                    response = await client.ask_with_context(
-                        question="Test",
-                        system_prompt="Test",
-                        context_messages=[],
-                    )
+                client = GeminiClient()
+                client._usage_tracker = GeminiUsageTracker(usage_file=tmp_path / "usage.json")
+                response = await client.ask_with_context(
+                    question="Test",
+                    system_prompt="Test",
+                    context_messages=[],
+                )
 
-                    assert response.success is False
-                    assert "No text response" in response.error_message
+                assert response.success is False
+                assert "No text response" in response.error_message
 
     @pytest.mark.asyncio
     async def test_ask_with_context_all_models_exhausted(self, tmp_path: Path):

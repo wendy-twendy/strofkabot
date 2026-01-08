@@ -11,8 +11,10 @@ from strofkabot.config import GEMINI_MAX_CONTEXT_MESSAGES
 from strofkabot.discord_db import Database
 from strofkabot.gemini_client import GeminiClient
 from strofkabot.openrouter_client import OpenRouterClient
+from strofkabot.url_extractor import extract_urls_from_messages, format_url_context
 from strofkabot.utils import (
     build_system_prompt,
+    extract_images_from_messages,
     fetch_context_messages,
     format_error_response,
     parse_prediction_date,
@@ -99,22 +101,41 @@ class AICog(commands.Cog):
 
             async with ctx.typing():
                 try:
+                    # Fetch ALL context messages (for conversation history)
                     messages = await fetch_context_messages(
                         ctx.channel,
                         exclude_message_id=ctx.message.id,
                         limit=GEMINI_MAX_CONTEXT_MESSAGES,
                     )
 
-                    context_dicts, images = await prepare_context(messages)
+                    # Prepare text context from all messages
+                    context_dicts = await prepare_context(messages)
 
-                    user_roles = [
-                        role.name for role in ctx.author.roles if role.name != "@everyone"
-                    ]
+                    # Extract images from: !ask message + last 2 context messages only
+                    recent_messages = [ctx.message]
+                    if messages:
+                        recent_messages.extend(messages[-2:])
+                    images = await extract_images_from_messages(recent_messages)
+
+                    # Extract URLs from: question + last 2 context messages only
+                    url_sources = [{"content": question}]
+                    if context_dicts:
+                        url_sources.extend(context_dicts[-2:])
+                    url_contents = await extract_urls_from_messages(url_sources)
+                    url_context = format_url_context(url_contents)
+
+                    # Get query metadata FIRST for dynamic system prompt
+                    query_metadata = None
+                    if self.openrouter_client is not None and not images:
+                        query_metadata = await self.openrouter_client.classify_query(
+                            question, context_dicts
+                        )
+
                     system_prompt = build_system_prompt(
                         guild_name=ctx.guild.name if ctx.guild else "Direct Message",
                         channel_name=ctx.channel.name if hasattr(ctx.channel, "name") else "DM",
                         user_name=ctx.author.display_name,
-                        user_roles=user_roles,
+                        query_metadata=query_metadata,
                     )
 
                     response = None
@@ -127,6 +148,8 @@ class AICog(commands.Cog):
                             system_prompt=system_prompt,
                             context_messages=context_dicts,
                             images=images if images else None,
+                            query_metadata=query_metadata,
+                            url_context=url_context if url_context else None,
                         )
 
                         if response.success:
@@ -158,9 +181,7 @@ class AICog(commands.Cog):
                     if not response.success:
                         provider = "Gemini" if used_fallback else "OpenRouter"
                         self.logger.error(f"{provider} error: {response.error_message}")
-                        if "Daily limit" in (response.error_message or ""):
-                            await ctx.send(format_error_response("exhausted"))
-                        elif "rate" in (response.error_message or "").lower():
+                        if "rate" in (response.error_message or "").lower():
                             await ctx.send(format_error_response("rate_limit"))
                         else:
                             await ctx.send(format_error_response("api", response.error_message))
