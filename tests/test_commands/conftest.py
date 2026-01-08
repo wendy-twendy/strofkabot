@@ -1,6 +1,7 @@
 """
 Fixtures for Discord bot command tests using dpytest.
 """
+
 import logging
 from pathlib import Path
 from unittest.mock import AsyncMock
@@ -26,13 +27,18 @@ def mock_artan_quotes(tmp_path: Path):
 
 @pytest.fixture
 async def bot_with_mocked_db(tmp_path: Path, mock_logger: logging.Logger):
-    """Create a bot with fully mocked database for isolated tests."""
+    """Create a bot with fully mocked database for isolated tests.
+
+    Returns:
+        tuple: (bot, mock_db, mock_user_stats, main_cog)
+        Access sub-cogs via bot.get_cog('EntertainmentCog'), etc.
+    """
     intents = discord.Intents.default()
     intents.members = True
     intents.message_content = True
     intents.reactions = True
 
-    b = commands.Bot(command_prefix='!', intents=intents)
+    b = commands.Bot(command_prefix="!", intents=intents)
     await b._async_setup_hook()
 
     # Mock database
@@ -57,6 +63,6 @@ async def bot_with_mocked_db(tmp_path: Path, mock_logger: logging.Logger):
 @pytest.fixture
 def mock_logger() -> logging.Logger:
     """Create a mock logger for testing."""
-    logger = logging.getLogger('test_logger')
+    logger = logging.getLogger("test_logger")
     logger.setLevel(logging.DEBUG)
     return logger

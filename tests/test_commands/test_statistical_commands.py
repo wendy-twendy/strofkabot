@@ -18,7 +18,9 @@ class TestRpmCommand:
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
         # Simulate an error by making send_personal_stats raise
-        with patch("strofkabot.llumi.send_personal_stats", new_callable=AsyncMock) as mock_send:
+        with patch(
+            "strofkabot.cogs.user_stats.send_personal_stats", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.side_effect = Exception("Database error")
             await dpytest.message("!rpm")
             response = dpytest.get_message()
@@ -29,7 +31,9 @@ class TestRpmCommand:
         """Test !rpm --leaderboard handles errors gracefully."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.send_leaderboard", new_callable=AsyncMock) as mock_send:
+        with patch(
+            "strofkabot.cogs.user_stats.send_leaderboard", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.side_effect = Exception("Leaderboard error")
             await dpytest.message("!rpm --leaderboard")
             response = dpytest.get_message()
@@ -53,11 +57,17 @@ class TestInflationCommand:
             {"year": 2024, "average_rpm": 2.0},
         ]
 
-        with patch("strofkabot.llumi.fetch_inflation_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_inflation_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = (monthly_data, yearly_data)
 
-            with patch("strofkabot.llumi.create_monthly_inflation_plot") as mock_monthly_plot:
-                with patch("strofkabot.llumi.create_yearly_inflation_plot") as mock_yearly_plot:
+            with patch(
+                "strofkabot.cogs.economics.create_monthly_inflation_plot"
+            ) as mock_monthly_plot:
+                with patch(
+                    "strofkabot.cogs.economics.create_yearly_inflation_plot"
+                ) as mock_yearly_plot:
                     mock_monthly_plot.return_value = io.BytesIO(b"fake png data")
                     mock_yearly_plot.return_value = io.BytesIO(b"fake png data")
 
@@ -73,7 +83,9 @@ class TestInflationCommand:
         """Test !inflation handles errors gracefully."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.fetch_inflation_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_inflation_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.side_effect = Exception("Inflation calculation error")
             await dpytest.message("!inflation")
             response = dpytest.get_message()
@@ -88,8 +100,10 @@ class TestTradeCommand:
         """Test !trade defaults to monthly mode and shows current month data."""
         bot, _, mock_user_stats, cog = bot_with_mocked_db
 
-        cog.guild = MagicMock()
-        cog.guild.get_member = MagicMock(return_value=None)
+        # Get the economics cog and set guild on it
+        economics_cog = bot.get_cog("EconomicsCog")
+        economics_cog.guild = MagicMock()
+        economics_cog.guild.get_member = MagicMock(return_value=None)
 
         trade_data = {
             "exports": [("Alice", 50), ("Bob", 30)],
@@ -100,7 +114,7 @@ class TestTradeCommand:
         }
 
         with patch(
-            "strofkabot.llumi.get_reaction_trade_data_for_month", new_callable=AsyncMock
+            "strofkabot.cogs.economics.get_reaction_trade_data_for_month", new_callable=AsyncMock
         ) as mock_trade:
             mock_trade.return_value = trade_data
             await dpytest.message("!trade")
@@ -118,8 +132,9 @@ class TestTradeCommand:
         """Test !trade --yearly shows 12-month rolling data."""
         bot, _, mock_user_stats, cog = bot_with_mocked_db
 
-        cog.guild = MagicMock()
-        cog.guild.get_member = MagicMock(return_value=None)
+        economics_cog = bot.get_cog("EconomicsCog")
+        economics_cog.guild = MagicMock()
+        economics_cog.guild.get_member = MagicMock(return_value=None)
 
         trade_data = {
             "exports": [("Alice", 50)],
@@ -130,7 +145,7 @@ class TestTradeCommand:
         }
 
         with patch(
-            "strofkabot.llumi.get_reaction_trade_data", new_callable=AsyncMock
+            "strofkabot.cogs.economics.get_reaction_trade_data", new_callable=AsyncMock
         ) as mock_trade:
             mock_trade.return_value = trade_data
             await dpytest.message("!trade --yearly")
@@ -144,8 +159,9 @@ class TestTradeCommand:
         """Test !trade shows SURPLUS when receiving more than giving."""
         bot, _, mock_user_stats, cog = bot_with_mocked_db
 
-        cog.guild = MagicMock()
-        cog.guild.get_member = MagicMock(return_value=None)
+        economics_cog = bot.get_cog("EconomicsCog")
+        economics_cog.guild = MagicMock()
+        economics_cog.guild.get_member = MagicMock(return_value=None)
 
         trade_data = {
             "exports": [("Alice", 30)],
@@ -156,7 +172,7 @@ class TestTradeCommand:
         }
 
         with patch(
-            "strofkabot.llumi.get_reaction_trade_data_for_month", new_callable=AsyncMock
+            "strofkabot.cogs.economics.get_reaction_trade_data_for_month", new_callable=AsyncMock
         ) as mock_trade:
             mock_trade.return_value = trade_data
             await dpytest.message("!trade")
@@ -169,8 +185,9 @@ class TestTradeCommand:
         """Test !trade shows NEUTRAL when balanced."""
         bot, _, mock_user_stats, cog = bot_with_mocked_db
 
-        cog.guild = MagicMock()
-        cog.guild.get_member = MagicMock(return_value=None)
+        economics_cog = bot.get_cog("EconomicsCog")
+        economics_cog.guild = MagicMock()
+        economics_cog.guild.get_member = MagicMock(return_value=None)
 
         trade_data = {
             "exports": [("Alice", 50)],
@@ -181,7 +198,7 @@ class TestTradeCommand:
         }
 
         with patch(
-            "strofkabot.llumi.get_reaction_trade_data_for_month", new_callable=AsyncMock
+            "strofkabot.cogs.economics.get_reaction_trade_data_for_month", new_callable=AsyncMock
         ) as mock_trade:
             mock_trade.return_value = trade_data
             await dpytest.message("!trade")
@@ -194,8 +211,9 @@ class TestTradeCommand:
         """Test !trade (monthly) handles no activity gracefully."""
         bot, _, mock_user_stats, cog = bot_with_mocked_db
 
-        cog.guild = MagicMock()
-        cog.guild.get_member = MagicMock(return_value=None)
+        economics_cog = bot.get_cog("EconomicsCog")
+        economics_cog.guild = MagicMock()
+        economics_cog.guild.get_member = MagicMock(return_value=None)
 
         trade_data = {
             "exports": [],
@@ -206,7 +224,7 @@ class TestTradeCommand:
         }
 
         with patch(
-            "strofkabot.llumi.get_reaction_trade_data_for_month", new_callable=AsyncMock
+            "strofkabot.cogs.economics.get_reaction_trade_data_for_month", new_callable=AsyncMock
         ) as mock_trade:
             mock_trade.return_value = trade_data
             await dpytest.message("!trade")
@@ -219,8 +237,9 @@ class TestTradeCommand:
         """Test !trade --yearly handles no export/import data."""
         bot, _, mock_user_stats, cog = bot_with_mocked_db
 
-        cog.guild = MagicMock()
-        cog.guild.get_member = MagicMock(return_value=None)
+        economics_cog = bot.get_cog("EconomicsCog")
+        economics_cog.guild = MagicMock()
+        economics_cog.guild.get_member = MagicMock(return_value=None)
 
         trade_data = {
             "exports": [],
@@ -231,7 +250,7 @@ class TestTradeCommand:
         }
 
         with patch(
-            "strofkabot.llumi.get_reaction_trade_data", new_callable=AsyncMock
+            "strofkabot.cogs.economics.get_reaction_trade_data", new_callable=AsyncMock
         ) as mock_trade:
             mock_trade.return_value = trade_data
             await dpytest.message("!trade --yearly")
@@ -245,10 +264,11 @@ class TestTradeCommand:
         """Test !trade handles errors gracefully."""
         bot, _, mock_user_stats, cog = bot_with_mocked_db
 
-        cog.guild = MagicMock()
+        economics_cog = bot.get_cog("EconomicsCog")
+        economics_cog.guild = MagicMock()
 
         with patch(
-            "strofkabot.llumi.get_reaction_trade_data_for_month", new_callable=AsyncMock
+            "strofkabot.cogs.economics.get_reaction_trade_data_for_month", new_callable=AsyncMock
         ) as mock_trade:
             mock_trade.side_effect = Exception("Trade data error")
             await dpytest.message("!trade")
@@ -269,10 +289,12 @@ class TestGdpCommand:
             {"year": 2024, "month": 2, "total_messages": 1200},
         ]
 
-        with patch("strofkabot.llumi.fetch_gdp_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_gdp_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = gdp_data
 
-            with patch("strofkabot.llumi.create_gdp_plot") as mock_plot:
+            with patch("strofkabot.cogs.economics.create_gdp_plot") as mock_plot:
                 mock_plot.return_value = io.BytesIO(b"fake png data")
 
                 await dpytest.message("!gdp")
@@ -285,7 +307,9 @@ class TestGdpCommand:
         """Test !gdp handles empty data."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.fetch_gdp_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_gdp_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = []
 
             await dpytest.message("!gdp")
@@ -298,7 +322,9 @@ class TestGdpCommand:
         """Test !gdp handles errors gracefully."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.fetch_gdp_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_gdp_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.side_effect = Exception("GDP calculation error")
             await dpytest.message("!gdp")
             response = dpytest.get_message()
@@ -324,10 +350,12 @@ class TestHdiCommand:
             },
         ]
 
-        with patch("strofkabot.llumi.fetch_hdi_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_hdi_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = hdi_data
 
-            with patch("strofkabot.llumi.create_hdi_plot") as mock_plot:
+            with patch("strofkabot.cogs.economics.create_hdi_plot") as mock_plot:
                 mock_plot.return_value = io.BytesIO(b"fake png data")
 
                 await dpytest.message("!hdi")
@@ -340,7 +368,9 @@ class TestHdiCommand:
         """Test !hdi handles empty data."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.fetch_hdi_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_hdi_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = []
 
             await dpytest.message("!hdi")
@@ -353,7 +383,9 @@ class TestHdiCommand:
         """Test !hdi handles errors gracefully."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.fetch_hdi_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_hdi_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.side_effect = Exception("HDI calculation error")
             await dpytest.message("!hdi")
             response = dpytest.get_message()
@@ -368,7 +400,9 @@ class TestMostLikedCommand:
         """Test !most-liked calls the send_most_liked_stats utility."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.send_most_liked_stats", new_callable=AsyncMock) as mock_send:
+        with patch(
+            "strofkabot.cogs.user_stats.send_most_liked_stats", new_callable=AsyncMock
+        ) as mock_send:
             await dpytest.message("!most-liked")
             assert mock_send.called
 
@@ -377,7 +411,9 @@ class TestMostLikedCommand:
         """Test !most-liked handles errors gracefully."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.send_most_liked_stats", new_callable=AsyncMock) as mock_send:
+        with patch(
+            "strofkabot.cogs.user_stats.send_most_liked_stats", new_callable=AsyncMock
+        ) as mock_send:
             mock_send.side_effect = Exception("Network analysis error")
             await dpytest.message("!most-liked")
             response = dpytest.get_message()
@@ -404,11 +440,17 @@ class TestInflationSuccessPath:
         # Create fake PNG data (with PNG header)
         fake_png = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
 
-        with patch("strofkabot.llumi.fetch_inflation_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_inflation_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = (monthly_data, yearly_data)
 
-            with patch("strofkabot.llumi.create_monthly_inflation_plot") as mock_monthly_plot:
-                with patch("strofkabot.llumi.create_yearly_inflation_plot") as mock_yearly_plot:
+            with patch(
+                "strofkabot.cogs.economics.create_monthly_inflation_plot"
+            ) as mock_monthly_plot:
+                with patch(
+                    "strofkabot.cogs.economics.create_yearly_inflation_plot"
+                ) as mock_yearly_plot:
                     mock_monthly_plot.return_value = io.BytesIO(
                         b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
                     )
@@ -434,10 +476,12 @@ class TestGdpSuccessPath:
             {"year": 2024, "month": 2, "total_messages": 1200},
         ]
 
-        with patch("strofkabot.llumi.fetch_gdp_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_gdp_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = gdp_data
 
-            with patch("strofkabot.llumi.create_gdp_plot") as mock_plot:
+            with patch("strofkabot.cogs.economics.create_gdp_plot") as mock_plot:
                 mock_plot.return_value = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
 
                 await dpytest.message("!gdp")
@@ -457,10 +501,12 @@ class TestGdpSuccessPath:
             {"year": 2024, "month": 2, "total_messages": 1200},
         ]
 
-        with patch("strofkabot.llumi.fetch_gdp_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_gdp_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = gdp_data
 
-            with patch("strofkabot.llumi.create_gdp_plot") as mock_plot:
+            with patch("strofkabot.cogs.economics.create_gdp_plot") as mock_plot:
                 mock_plot.return_value = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
 
                 await dpytest.message("!gdp --all")
@@ -495,10 +541,12 @@ class TestHdiSuccessPath:
             },
         ]
 
-        with patch("strofkabot.llumi.fetch_hdi_data", new_callable=AsyncMock) as mock_fetch:
+        with patch(
+            "strofkabot.cogs.economics.fetch_hdi_data", new_callable=AsyncMock
+        ) as mock_fetch:
             mock_fetch.return_value = hdi_data
 
-            with patch("strofkabot.llumi.create_hdi_plot") as mock_plot:
+            with patch("strofkabot.cogs.economics.create_hdi_plot") as mock_plot:
                 mock_plot.return_value = io.BytesIO(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
 
                 await dpytest.message("!hdi")
@@ -517,7 +565,9 @@ class TestRpmSuccessPath:
         """Test !rpm (without flags) calls send_personal_stats."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.send_personal_stats", new_callable=AsyncMock) as mock_send:
+        with patch(
+            "strofkabot.cogs.user_stats.send_personal_stats", new_callable=AsyncMock
+        ) as mock_send:
             await dpytest.message("!rpm")
             mock_send.assert_called_once()
 
@@ -526,6 +576,8 @@ class TestRpmSuccessPath:
         """Test !rpm --leaderboard calls send_leaderboard."""
         bot, _, mock_user_stats, _ = bot_with_mocked_db
 
-        with patch("strofkabot.llumi.send_leaderboard", new_callable=AsyncMock) as mock_send:
+        with patch(
+            "strofkabot.cogs.user_stats.send_leaderboard", new_callable=AsyncMock
+        ) as mock_send:
             await dpytest.message("!rpm --leaderboard")
             mock_send.assert_called_once()

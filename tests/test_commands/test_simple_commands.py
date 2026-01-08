@@ -1,6 +1,7 @@
 """
 Tests for simple Discord commands (!unsubscribe, !artan).
 """
+
 import discord.ext.test as dpytest
 import pytest
 
@@ -36,8 +37,9 @@ class TestArtanCommand:
         """Test !artan handles uninitialized quotes gracefully."""
         bot, _, _, cog = bot_with_mocked_db
 
-        # Set artan_quotes to None to simulate unavailable quotes
-        cog.artan_quotes = None
+        # Set artan_quotes to None on the EntertainmentCog to simulate unavailable quotes
+        entertainment_cog = bot.get_cog("EntertainmentCog")
+        entertainment_cog.artan_quotes = None
 
         await dpytest.message("!artan")
         assert dpytest.verify().message().content("Quote feature is currently unavailable.")

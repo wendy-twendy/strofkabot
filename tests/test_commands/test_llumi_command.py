@@ -83,7 +83,7 @@ class TestLlumiCommand:
         mock_db.get_message_count.return_value = 10
         mock_db.get_attachment_count.return_value = 5
 
-        with patch("strofkabot.llumi.random.randint", return_value=1):
+        with patch("strofkabot.cogs.entertainment.random.randint", return_value=1):
             await dpytest.message("!llumi")
             assert dpytest.verify().message().content("Ik qiu Jordi")
 
@@ -103,7 +103,7 @@ class TestLlumiCommand:
             author_id=1,
         )
 
-        with patch("strofkabot.llumi.random.randint", return_value=2):
+        with patch("strofkabot.cogs.entertainment.random.randint", return_value=2):
             await dpytest.message("!llumi")
             assert dpytest.verify().message().content("Regular message")
 
@@ -132,9 +132,11 @@ class TestLlumiCommand:
             local_path=str(test_image),
         )
 
-        with patch("strofkabot.llumi.random.randint", return_value=2):  # Skip Easter egg
-            with patch("strofkabot.llumi.random.random", return_value=0.3):  # < 0.5, send image
-                with patch("strofkabot.llumi.ATTACHMENTS_DIR", tmp_path):
+        with patch(
+            "strofkabot.cogs.entertainment.random.randint", return_value=2
+        ):  # Skip Easter egg
+            with patch("strofkabot.cogs.entertainment.random.random", return_value=0.3):  # < 0.5
+                with patch("strofkabot.cogs.entertainment.ATTACHMENTS_DIR", tmp_path):
                     await dpytest.message("!llumi")
                     # Should send an attachment, not a text message
                     mock_db.get_random_attachment.assert_called_once()
@@ -155,8 +157,10 @@ class TestLlumiCommand:
             author_id=1,
         )
 
-        with patch("strofkabot.llumi.random.randint", return_value=2):  # Skip Easter egg
-            with patch("strofkabot.llumi.random.random", return_value=0.7):  # >= 0.5, send message
+        with patch(
+            "strofkabot.cogs.entertainment.random.randint", return_value=2
+        ):  # Skip Easter egg
+            with patch("strofkabot.cogs.entertainment.random.random", return_value=0.7):  # >= 0.5
                 await dpytest.message("!llumi")
                 assert dpytest.verify().message().content("Text message")
                 mock_db.get_random_message.assert_called_once()
@@ -177,9 +181,11 @@ class TestLlumiCommand:
             author_id=1,
         )
 
-        with patch("strofkabot.llumi.random.randint", return_value=2):  # Skip Easter egg
+        with patch(
+            "strofkabot.cogs.entertainment.random.randint", return_value=2
+        ):  # Skip Easter egg
             with patch(
-                "strofkabot.llumi.random.random", return_value=0.3
+                "strofkabot.cogs.entertainment.random.random", return_value=0.3
             ):  # Would be image, but none exist
                 await dpytest.message("!llumi")
                 assert dpytest.verify().message().content("Fallback message")
@@ -207,12 +213,12 @@ class TestOnThisDayCommand:
         )
         mock_db.get_username_by_id.return_value = "TestUser"
 
-        with patch("strofkabot.llumi.datetime") as mock_datetime:
+        with patch("strofkabot.cogs.entertainment.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
                 2024, 1, 7, 12, 0, 0, tzinfo=datetime.UTC
             )
             mock_datetime.UTC = datetime.UTC
-            with patch("strofkabot.llumi.random.choice", return_value=2023):
+            with patch("strofkabot.cogs.entertainment.random.choice", return_value=2023):
                 await dpytest.message("!otd")
 
         response = dpytest.get_message()
@@ -240,12 +246,12 @@ class TestOnThisDayCommand:
         )
         mock_db.get_username_by_id.return_value = "AnotherUser"
 
-        with patch("strofkabot.llumi.datetime") as mock_datetime:
+        with patch("strofkabot.cogs.entertainment.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
                 2024, 6, 15, 12, 0, 0, tzinfo=datetime.UTC
             )
             mock_datetime.UTC = datetime.UTC
-            with patch("strofkabot.llumi.random.choice", return_value=2022):
+            with patch("strofkabot.cogs.entertainment.random.choice", return_value=2022):
                 await dpytest.message("!on-this-day")
 
         response = dpytest.get_message()
@@ -259,7 +265,7 @@ class TestOnThisDayCommand:
 
         mock_db.get_on_this_day_years.return_value = []
 
-        with patch("strofkabot.llumi.datetime") as mock_datetime:
+        with patch("strofkabot.cogs.entertainment.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
                 2024, 1, 7, 12, 0, 0, tzinfo=datetime.UTC
             )
@@ -278,7 +284,7 @@ class TestOnThisDayCommand:
         # Only current year has data
         mock_db.get_on_this_day_years.return_value = [2024]
 
-        with patch("strofkabot.llumi.datetime") as mock_datetime:
+        with patch("strofkabot.cogs.entertainment.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
                 2024, 1, 7, 12, 0, 0, tzinfo=datetime.UTC
             )
@@ -306,12 +312,12 @@ class TestOnThisDayCommand:
         )
         mock_db.get_username_by_id.return_value = "OldUser"
 
-        with patch("strofkabot.llumi.datetime") as mock_datetime:
+        with patch("strofkabot.cogs.entertainment.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
                 2024, 3, 10, 12, 0, 0, tzinfo=datetime.UTC
             )
             mock_datetime.UTC = datetime.UTC
-            with patch("strofkabot.llumi.random.choice", return_value=2020):
+            with patch("strofkabot.cogs.entertainment.random.choice", return_value=2020):
                 await dpytest.message("!otd")
 
         response = dpytest.get_message()
@@ -335,12 +341,14 @@ class TestOnThisDayCommand:
         )
         mock_db.get_username_by_id.return_value = "RandomUser"
 
-        with patch("strofkabot.llumi.datetime") as mock_datetime:
+        with patch("strofkabot.cogs.entertainment.datetime") as mock_datetime:
             mock_datetime.datetime.now.return_value = datetime.datetime(
                 2024, 5, 5, 12, 0, 0, tzinfo=datetime.UTC
             )
             mock_datetime.UTC = datetime.UTC
-            with patch("strofkabot.llumi.random.choice", return_value=2021) as mock_choice:
+            with patch(
+                "strofkabot.cogs.entertainment.random.choice", return_value=2021
+            ) as mock_choice:
                 await dpytest.message("!otd")
                 # Verify random.choice was called with the past years list
                 mock_choice.assert_called_once_with([2020, 2021, 2022, 2023])
