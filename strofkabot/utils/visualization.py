@@ -170,13 +170,8 @@ def create_gdp_plot(data: list[dict]) -> io.BytesIO:
     if n_points <= 24:
         label_indices = set(range(n_points))
     else:
-        # Interval-based labels
-        if n_points <= 48:
-            label_interval = 3
-        elif n_points <= 84:
-            label_interval = 6
-        else:
-            label_interval = 12
+        # Always use 3-month intervals
+        label_interval = 3
         label_indices = set(range(0, n_points, label_interval))
         # Always include first, last, max, min
         label_indices.add(0)

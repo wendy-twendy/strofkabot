@@ -65,7 +65,11 @@ async def fetch_gdp_data(user_stats, show_all: bool = False) -> list[dict]:
         show_all: If True, returns all data without limit. If False, limits to 24 months.
     """
     limit = None if show_all else 24
-    return await user_stats.get_gdp_data(limit=limit)
+    data = await user_stats.get_gdp_data(limit=limit)
+    if show_all:
+        # Cap start to 2019
+        data = [d for d in data if d["year"] >= 2019]
+    return data
 
 
 async def fetch_hdi_data(user_stats) -> list[dict]:
@@ -249,6 +253,47 @@ async def fetch_hourly_activity_data_for_month(
         activity_matrix[display_day, hour] = count
 
     return activity_matrix
+
+
+async def fetch_hourly_activity_data_for_range(
+    message_history_db,
+    user_id: int,
+    end_year: int,
+    end_month: int,
+    num_months: int,
+    timezone_offset: int = 0,
+) -> np.ndarray | None:
+    """Fetch hourly activity data for a user for a range of months.
+
+    Args:
+        message_history_db: MessageHistoryDatabase instance.
+        user_id: Discord user ID.
+        end_year: End year of the range.
+        end_month: End month of the range (1-12).
+        num_months: Number of months to include (1-12).
+        timezone_offset: Hours offset from UTC.
+
+    Returns:
+        7x24 numpy array where rows are days (Mon-Sun) and columns are hours (0-23).
+        Returns None if no data found across all months.
+    """
+    from strofkabot.utils.date_utils import adjust_month
+
+    # Aggregate data from all months in the range
+    combined_matrix = np.zeros((7, 24), dtype=int)
+    has_data = False
+
+    for i in range(num_months):
+        # Go backwards from end month
+        year, month = adjust_month(end_year, end_month, -i)
+        month_data = await fetch_hourly_activity_data_for_month(
+            message_history_db, user_id, year, month, timezone_offset
+        )
+        if month_data is not None:
+            combined_matrix += month_data
+            has_data = True
+
+    return combined_matrix if has_data else None
 
 
 def calculate_normalized_entropy(distribution: list[int]) -> float:

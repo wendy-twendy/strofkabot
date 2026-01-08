@@ -316,12 +316,13 @@ def format_period_string(start_year: int, start_month: int, num_months: int) -> 
         "Dec",
     ]
 
-    now = datetime.now()
-    # End month is the current month (included in window)
-    end_month = now.month
-    end_year = now.year
-
     if num_months == 1:
         return f"{month_names[start_month]} {start_year}"
     else:
+        # Calculate end month from start + num_months - 1
+        end_year = start_year
+        end_month = start_month + num_months - 1
+        while end_month > 12:
+            end_month -= 12
+            end_year += 1
         return f"{month_names[start_month]} {start_year} - {month_names[end_month]} {end_year}"

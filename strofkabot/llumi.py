@@ -45,7 +45,7 @@ from strofkabot.utils import (
     detect_communities,
     fetch_gdp_data,
     fetch_hdi_data,
-    fetch_hourly_activity_data_for_month,
+    fetch_hourly_activity_data_for_range,
     fetch_inflation_data,
     format_period_string,
     get_reaction_trade_data,
@@ -628,24 +628,36 @@ class LlumiBot(commands.Cog):
                 await ctx.send(f"No reaction data available for {period_str}.")
                 return
 
-            # Build graph
-            directed_graph = build_reaction_graph(reaction_data)
+            # Filter edges: min weight = 3 per month, bidirectional only
+            min_edge_weight = 3 * months
 
-            # Filter low-activity users (min 20 reactions given+received)
-            min_activity = 20
-            activity = compute_node_activity(directed_graph)
-            low_activity_users = [u for u, a in activity.items() if a < min_activity]
-            filtered_graph = directed_graph.copy()
-            filtered_graph.remove_nodes_from(low_activity_users)
-            excluded_count = len(low_activity_users)
+            # Build edge dict with min weight filter
+            edges: dict[tuple[str, str], int] = {}
+            for giver, receiver, count in reaction_data:
+                if count >= min_edge_weight:
+                    edges[(giver, receiver)] = count
 
-            if filtered_graph.number_of_nodes() == 0:
+            # Keep only bidirectional edges (both A->B and B->A must exist)
+            bidirectional_data: list[tuple[str, str, int]] = []
+            seen_pairs: set[tuple[str, str]] = set()
+            for (giver, receiver), count in edges.items():
+                if (receiver, giver) in edges:
+                    pair = tuple(sorted([giver, receiver]))
+                    if pair not in seen_pairs:
+                        seen_pairs.add(pair)
+                        bidirectional_data.append((giver, receiver, count))
+                        bidirectional_data.append((receiver, giver, edges[(receiver, giver)]))
+
+            if not bidirectional_data:
                 period_str = format_period_string(start_year, start_month, months)
-                await ctx.send(f"No users with enough activity for {period_str}.")
+                await ctx.send(f"No strong mutual connections for {period_str}.")
                 return
 
+            # Build graph from bidirectional data
+            directed_graph = build_reaction_graph(bidirectional_data)
+
             # Detect communities with resolution=1.5
-            communities = detect_communities(filtered_graph, resolution=1.5)
+            communities = detect_communities(directed_graph, resolution=1.5)
 
             if not communities:
                 period_str = format_period_string(start_year, start_month, months)
@@ -667,8 +679,7 @@ class LlumiBot(commands.Cog):
 
             # Build response
             response = f"**Social Clusters** ({period_str})\n"
-            excluded_note = f", {excluded_count} excluded" if excluded_count > 0 else ""
-            response += f"*{len(sorted_groups)} communities{excluded_note}*\n```\n"
+            response += f"*{len(sorted_groups)} groups, {len(communities)} members*\n```\n"
 
             for comm_id, members in sorted_groups:
                 members_sorted = sorted(members)
@@ -919,14 +930,14 @@ class LlumiBot(commands.Cog):
 
     @commands.command(
         name="activity",
-        help="Shows activity heatmap. Usage: !activity [@user] [--tz OFFSET]",
+        help="Shows activity heatmap. Usage: !activity [@user] [--months N]",
     )
     async def show_activity_heatmap(self, ctx: commands.Context, *, args: str = ""):
         """Display an hourly activity heatmap for a user with month navigation.
 
         Optional arguments:
             @user: Mention a user to see their heatmap (default: self)
-            --tz OFFSET: Timezone offset from UTC (e.g., --tz +1 for CET, --tz -5 for EST)
+            --months N: Number of months to include (1-12, default: 3)
         """
         message_history_db = self.task_manager.message_history_db
         if not message_history_db:
@@ -936,52 +947,66 @@ class LlumiBot(commands.Cog):
         # Parse target user (mentioned or self)
         target_user = ctx.message.mentions[0] if ctx.message.mentions else ctx.author
 
-        # Parse timezone offset
-        timezone_offset = 0
-        tz_match = re.search(r"--tz\s*([+-]?\d+)", args.lower())
-        if tz_match:
-            timezone_offset = int(tz_match.group(1))
-            timezone_offset = max(-12, min(14, timezone_offset))  # Clamp to valid range
+        # Parse number of months (default 3, max 12)
+        num_months = 3
+        months_match = re.search(r"--months\s*(\d+)", args.lower())
+        if months_match:
+            num_months = int(months_match.group(1))
+            num_months = max(1, min(12, num_months))  # Clamp to 1-12
 
-        await self._send_activity_heatmap(ctx, target_user, timezone_offset, month_offset=0)
+        await self._send_activity_heatmap(ctx, target_user, num_months, window_offset=0)
 
     async def _send_activity_heatmap(
         self,
         ctx: commands.Context,
         target_user: discord.Member,
-        timezone_offset: int,
-        month_offset: int,
+        num_months: int,
+        window_offset: int,
     ):
         """Send activity heatmap with navigation reactions."""
         message_history_db = self.task_manager.message_history_db
+        # Hardcoded to Tirana (Albania) timezone: UTC+1
+        timezone_offset = 1
+        timezone_label = "Tirana"
 
         try:
-            # Calculate target month
+            # Calculate end month for the window
+            # window_offset=0 means current month is end of window
+            # window_offset=-1 means previous window (shifted back by num_months)
             now = datetime.datetime.now(datetime.UTC)
-            target_year, target_month = adjust_month(now.year, now.month, month_offset)
+            end_year, end_month = adjust_month(now.year, now.month, window_offset * num_months)
 
-            # Build timezone label
-            sign = "+" if timezone_offset >= 0 else ""
-            timezone_label = f"UTC{sign}{timezone_offset}" if timezone_offset != 0 else "UTC"
+            # Calculate start month for period string
+            start_year, start_month = adjust_month(end_year, end_month, -(num_months - 1))
 
             self.logger.info(
                 f"Generating activity heatmap for user {target_user.id} "
-                f"({target_year}-{target_month:02d}, tz_offset={timezone_offset})"
+                f"({start_year}-{start_month:02d} to {end_year}-{end_month:02d})"
             )
 
             # Ensure database is initialized
             await message_history_db.ensure_connection()
 
-            # Fetch data for specific month
-            activity_data = await fetch_hourly_activity_data_for_month(
-                message_history_db, target_user.id, target_year, target_month, timezone_offset
+            # Fetch data for the month range
+            activity_data = await fetch_hourly_activity_data_for_range(
+                message_history_db,
+                target_user.id,
+                end_year,
+                end_month,
+                num_months,
+                timezone_offset,
             )
 
             # Format period string
-            period_str = datetime.date(target_year, target_month, 1).strftime("%B %Y")
+            if num_months == 1:
+                period_str = datetime.date(end_year, end_month, 1).strftime("%B %Y")
+            else:
+                start_str = datetime.date(start_year, start_month, 1).strftime("%b %Y")
+                end_str = datetime.date(end_year, end_month, 1).strftime("%b %Y")
+                period_str = f"{start_str} - {end_str}"
 
             if activity_data is None or activity_data.sum() == 0:
-                # No data for this month - show message with navigation
+                # No data for this period - show message with navigation
                 message = await ctx.send(
                     f"No activity data for {target_user.display_name} in {period_str}."
                 )
@@ -1019,13 +1044,13 @@ class LlumiBot(commands.Cog):
                     reaction, user = await self.bot.wait_for(
                         "reaction_add", timeout=60.0, check=check
                     )
-                    new_offset = month_offset
+                    new_offset = window_offset
                     if str(reaction.emoji) == "⬅️":
-                        new_offset -= 1
+                        new_offset -= 1  # Go to previous window
                     elif str(reaction.emoji) == "➡️":
-                        new_offset += 1
+                        new_offset += 1  # Go to next window
                     await message.delete()
-                    await self._send_activity_heatmap(ctx, target_user, timezone_offset, new_offset)
+                    await self._send_activity_heatmap(ctx, target_user, num_months, new_offset)
                     break
                 except TimeoutError:
                     break
