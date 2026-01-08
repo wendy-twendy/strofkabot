@@ -9,6 +9,7 @@ from discord.ext import commands
 from strofkabot.config import GEMINI_MAX_CONTEXT_MESSAGES
 from strofkabot.discord_db import Database
 from strofkabot.gemini_client import GeminiClient
+from strofkabot.openrouter_client import OpenRouterClient
 from strofkabot.utils import (
     build_system_prompt,
     fetch_context_messages,
@@ -32,6 +33,19 @@ class AICog(commands.Cog):
         self.db = db
         self.logger = logger
         self._gemini_client: GeminiClient | None = None
+        self._openrouter_client: OpenRouterClient | None = None
+
+    @property
+    def openrouter_client(self) -> OpenRouterClient | None:
+        """Lazy initialization of OpenRouter client."""
+        if self._openrouter_client is None:
+            try:
+                self._openrouter_client = OpenRouterClient()
+                self.logger.info("OpenRouter client initialized successfully")
+            except ValueError as e:
+                self.logger.warning(f"OpenRouter client not available: {e}")
+                return None
+        return self._openrouter_client
 
     @property
     def gemini_client(self) -> GeminiClient | None:
@@ -50,12 +64,15 @@ class AICog(commands.Cog):
         help="Ask a question with AI assistance. Uses recent chat context and web search.",
     )
     async def ask_question(self, ctx: commands.Context, *, question: str = ""):
-        """Answer a question using Gemini AI with conversation context.
+        """Answer a question using AI with conversation context.
 
         Usage: !ask <your question>
 
         The bot will consider the last 10 messages in the channel as context,
         including any images. It can also search the web for current information.
+
+        Uses OpenRouter as primary (free models), falls back to Gemini for images
+        or if OpenRouter fails.
         """
         if not question.strip():
             await ctx.send(format_error_response("no_question"))
@@ -65,7 +82,8 @@ class AICog(commands.Cog):
             await ctx.send(format_error_response("too_long"))
             return
 
-        if self.gemini_client is None:
+        # Check if at least one client is available
+        if self.openrouter_client is None and self.gemini_client is None:
             await ctx.send(format_error_response("config"))
             return
 
@@ -89,15 +107,47 @@ class AICog(commands.Cog):
                     user_roles=user_roles,
                 )
 
-                response = await self.gemini_client.ask_with_context(
-                    question=question,
-                    system_prompt=system_prompt,
-                    context_messages=context_dicts,
-                    images=images if images else None,
-                )
+                response = None
+                used_fallback = False
+
+                # Try OpenRouter first (unless there are images)
+                if self.openrouter_client is not None and not images:
+                    response = await self.openrouter_client.ask_with_context(
+                        question=question,
+                        system_prompt=system_prompt,
+                        context_messages=context_dicts,
+                        images=None,
+                    )
+
+                    if response.success:
+                        self.logger.info(
+                            f"OpenRouter success: model={response.model_used}, "
+                            f"search={response.search_used}, thinking={response.thinking_used}"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"OpenRouter failed: {response.error_message}, falling back to Gemini"
+                        )
+                        response = None  # Try Gemini fallback
+
+                # Fall back to Gemini (for images or if OpenRouter failed)
+                if response is None and self.gemini_client is not None:
+                    used_fallback = True
+                    response = await self.gemini_client.ask_with_context(
+                        question=question,
+                        system_prompt=system_prompt,
+                        context_messages=context_dicts,
+                        images=images if images else None,
+                    )
+
+                # No response from either client
+                if response is None:
+                    await ctx.send(format_error_response("config"))
+                    return
 
                 if not response.success:
-                    self.logger.error(f"Gemini error: {response.error_message}")
+                    provider = "Gemini" if used_fallback else "OpenRouter"
+                    self.logger.error(f"{provider} error: {response.error_message}")
                     if "Daily limit" in (response.error_message or ""):
                         await ctx.send(format_error_response("exhausted"))
                     elif "rate" in (response.error_message or "").lower():
@@ -112,6 +162,7 @@ class AICog(commands.Cog):
 
                 self.logger.info(
                     f"Ask command completed for {ctx.author} using model {response.model_used}"
+                    + (" (fallback)" if used_fallback else "")
                 )
 
             except Exception:

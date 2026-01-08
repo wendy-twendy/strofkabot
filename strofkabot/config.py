@@ -32,3 +32,9 @@ GEMINI_RPD_LIMIT = 20  # Requests per day per model
 GEMINI_MAX_CONTEXT_MESSAGES = 10
 DISCORD_MAX_MESSAGE_LENGTH = 2000
 GEMINI_USAGE_FILE = Path(__file__).parent.parent / "data" / "gemini_usage.json"
+
+# OpenRouter AI configuration (primary, uses free models)
+OPENROUTER_INFERENCE_MODEL = "xiaomi/mimo-v2-flash:free"  # Fast, free inference model
+OPENROUTER_ROUTER_MODEL = (
+    "xiaomi/mimo-v2-flash:free"  # Fast, free classifier for search/thinking detection
+)
