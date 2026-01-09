@@ -23,7 +23,6 @@ def make_metadata(
     suggested_response_style: str = "conversational",
     language: str = "en",
     requires_citations: bool = False,
-    is_followup: bool = False,
 ) -> QueryMetadata:
     """Create a QueryMetadata instance with defaults."""
     return QueryMetadata(
@@ -35,7 +34,6 @@ def make_metadata(
         suggested_response_style=suggested_response_style,
         language=language,
         requires_citations=requires_citations,
-        is_followup=is_followup,
     )
 
 
@@ -76,7 +74,7 @@ class TestBuildSystemPrompt:
             channel_name="general",
             user_name="User",
         )
-        assert "helpful" in prompt.lower()
+        assert "unfiltered" in prompt.lower()
         assert "discord" in prompt.lower()
         assert "concise" in prompt.lower()
 
@@ -287,17 +285,6 @@ class TestBuildSystemPromptWithMetadata:
         )
         assert "Python" in prompt
         assert "async" in prompt
-
-    def test_is_followup_adds_hint(self):
-        """Test that is_followup adds context hint to prompt."""
-        metadata = make_metadata(is_followup=True)
-        prompt = build_system_prompt(
-            guild_name="Test",
-            channel_name="general",
-            user_name="User",
-            query_metadata=metadata,
-        )
-        assert "follow-up" in prompt.lower() or "previous" in prompt.lower()
 
 
 class TestBuildSystemPromptLanguage:

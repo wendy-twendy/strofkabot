@@ -17,7 +17,6 @@ def make_metadata(
     suggested_response_style: str = "conversational",
     language: str = "en",
     requires_citations: bool = False,
-    is_followup: bool = False,
 ) -> QueryMetadata:
     """Create a QueryMetadata instance with defaults."""
     return QueryMetadata(
@@ -29,7 +28,6 @@ def make_metadata(
         suggested_response_style=suggested_response_style,
         language=language,
         requires_citations=requires_citations,
-        is_followup=is_followup,
     )
 
 
@@ -47,7 +45,6 @@ class TestQueryMetadata:
             suggested_response_style="detailed",
             language="sr",
             requires_citations=True,
-            is_followup=True,
         )
 
         assert metadata.search is True
@@ -58,7 +55,6 @@ class TestQueryMetadata:
         assert metadata.suggested_response_style == "detailed"
         assert metadata.language == "sr"
         assert metadata.requires_citations is True
-        assert metadata.is_followup is True
 
 
 class TestOpenRouterResponse:
@@ -281,7 +277,6 @@ class TestClassifyQuery:
                 "suggested_response_style": "brief",
                 "language": "en",
                 "requires_citations": False,
-                "is_followup": False,
             }
         )
 
@@ -310,7 +305,6 @@ class TestClassifyQuery:
                 "suggested_response_style": "brief",
                 "language": "en",
                 "requires_citations": True,
-                "is_followup": False,
             }
         )
 
@@ -336,7 +330,6 @@ class TestClassifyQuery:
                 "suggested_response_style": "detailed",
                 "language": "en",
                 "requires_citations": False,
-                "is_followup": False,
             }
         )
 
@@ -347,32 +340,6 @@ class TestClassifyQuery:
         assert result.thinking is True
         assert result.reasoning_effort == "high"
         assert result.query_type == "technical"
-
-    @pytest.mark.asyncio
-    async def test_detects_followup_question(self, client):
-        """Test detecting a follow-up question."""
-        mock_response = MagicMock()
-        mock_response.choices = [MagicMock()]
-        mock_response.choices[0].message.content = json.dumps(
-            {
-                "search": False,
-                "thinking": False,
-                "reasoning_effort": "low",
-                "query_type": "factual",
-                "key_topics": [],
-                "suggested_response_style": "conversational",
-                "language": "en",
-                "requires_citations": False,
-                "is_followup": True,
-            }
-        )
-
-        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
-
-        context = [{"author": "Alice", "content": "I love Python!", "timestamp": "12:00"}]
-        result = await client.classify_query("What about JavaScript?", context)
-
-        assert result.is_followup is True
 
     @pytest.mark.asyncio
     async def test_detects_non_english_language(self, client):
@@ -389,7 +356,6 @@ class TestClassifyQuery:
                 "suggested_response_style": "brief",
                 "language": "sr",
                 "requires_citations": False,
-                "is_followup": False,
             }
         )
 
@@ -439,7 +405,6 @@ class TestAskWithContext:
                 "suggested_response_style": "conversational",
                 "language": "en",
                 "requires_citations": False,
-                "is_followup": False,
             }
         )
 

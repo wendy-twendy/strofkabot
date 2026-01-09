@@ -28,7 +28,6 @@ class QueryMetadata:
     suggested_response_style: str  # brief, detailed, step-by-step, conversational, sarcastic
     language: str  # ISO 639-1 code
     requires_citations: bool
-    is_followup: bool  # Is this a follow-up to previous messages?
 
 
 @dataclass
@@ -114,7 +113,6 @@ class OpenRouterClient:
                     suggested_response_style="conversational",
                     language="en",
                     requires_citations=False,
-                    is_followup=False,
                 )
             else:
                 metadata = query_metadata or await self._classify_query(question, context_messages)
@@ -209,7 +207,6 @@ class OpenRouterClient:
 CONTEXT ANALYSIS:
 - What language is the user speaking?
 - Are there images/videos being referenced?
-- Is this a follow-up to previous messages?
 
 QUERY CLASSIFICATION:
 1. search (bool): Needs current/recent information? (news, prices, events, unfamiliar people, "latest", "today")
@@ -235,9 +232,6 @@ QUERY CLASSIFICATION:
    - "sarcastic": User is joking or being sarcastic, match their energy
 7. language: ISO 639-1 code of user's quesion language (e.g., "en", "sr", "es")
 8. requires_citations: true if factual claims need sources
-9. is_followup (bool): Is this a follow-up or continuation of previous conversation?
-   - true: References previous messages ("what about...", "and the other one?", "can you explain more?", uses "it/that/this")
-   - false: New standalone question
 
 Output ONLY valid JSON with all fields."""
 
@@ -269,17 +263,15 @@ Output ONLY valid JSON with all fields."""
                 suggested_response_style=result.get("suggested_response_style", "conversational"),
                 language=result.get("language", "en"),
                 requires_citations=result.get("requires_citations", False),
-                is_followup=result.get("is_followup", False),
             )
 
             logger.debug(
-                "Router (%s): search=%s, thinking=%s, type=%s, style=%s, followup=%s",
+                "Router (%s): search=%s, thinking=%s, type=%s, style=%s",
                 OPENROUTER_ROUTER_MODEL,
                 metadata.search,
                 metadata.thinking,
                 metadata.query_type,
                 metadata.suggested_response_style,
-                metadata.is_followup,
             )
 
             return metadata
@@ -295,7 +287,6 @@ Output ONLY valid JSON with all fields."""
                 suggested_response_style="conversational",
                 language="en",
                 requires_citations=False,
-                is_followup=False,
             )
 
     def _build_messages(

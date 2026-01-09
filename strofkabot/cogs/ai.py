@@ -234,13 +234,46 @@ class AICog(commands.Cog):
 
     @commands.Cog.listener()
     async def on_message(self, message: discord.Message) -> None:
-        """Handle bot mentions as equivalent to !ask command."""
+        """Handle bot mentions and replies to bot messages as !ask command."""
         # Ignore bot messages
         if message.author.bot:
             return
 
+        # Skip command messages to avoid double-processing
+        if message.content.startswith("!"):
+            return
+
+        question = None
+
         # Check if bot is mentioned
-        if self.bot.user not in message.mentions:
+        if self.bot.user in message.mentions:
+            # Extract question by removing the mention
+            question = message.content
+            question = question.replace(f"<@{self.bot.user.id}>", "")
+            question = question.replace(f"<@!{self.bot.user.id}>", "")
+            question = question.strip()
+
+        # Check if replying to a bot message
+        elif message.reference and message.reference.message_id:
+            try:
+                referenced_msg = message.reference.resolved
+                if referenced_msg is None:
+                    referenced_msg = await message.channel.fetch_message(
+                        message.reference.message_id
+                    )
+
+                # Only trigger if replying to our bot's message
+                if referenced_msg.author.id == self.bot.user.id:
+                    question = message.content.strip()
+                    # If no text but has image attachments, use default question
+                    if not question and message.attachments:
+                        question = "What's in this image?"
+            except Exception:
+                # Referenced message deleted or fetch failed
+                return
+
+        # If no trigger condition met, exit
+        if question is None:
             return
 
         # Get per-channel lock
@@ -254,12 +287,6 @@ class AICog(commands.Cog):
             return
 
         async with channel_lock:
-            # Extract question by removing the mention
-            question = message.content
-            question = question.replace(f"<@{self.bot.user.id}>", "")
-            question = question.replace(f"<@!{self.bot.user.id}>", "")
-            question = question.strip()
-
             if not question:
                 await message.channel.send(format_error_response("no_question"))
                 return
@@ -273,7 +300,7 @@ class AICog(commands.Cog):
                 await message.channel.send(format_error_response("config"))
                 return
 
-            self.logger.info(f"Mention ask from {message.author}: {question[:50]}...")
+            self.logger.info(f"Implicit ask from {message.author}: {question[:50]}...")
             await self._handle_ask(message, question)
 
     @commands.command(
