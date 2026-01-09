@@ -54,12 +54,14 @@ async def fetch_context_messages(
 async def prepare_context(
     messages: list[discord.Message],
     nicknames: dict[int, list[str]] | None = None,
+    bot_user_id: int | None = None,
 ) -> list[dict]:
     """Prepare context messages for the AI (text only).
 
     Args:
         messages: List of Discord messages.
         nicknames: Optional dict mapping user IDs to nickname lists.
+        bot_user_id: Optional bot user ID to identify bot's own messages.
 
     Returns:
         List of formatted message context dicts.
@@ -82,6 +84,7 @@ async def prepare_context(
             "reply_to_author": reply_to_author,
             "reply_to_content": reply_to_content[:100] if reply_to_content else None,
             "image_count": len(image_attachments),
+            "is_bot": bot_user_id is not None and msg.author.id == bot_user_id,
         }
         context.append(context_entry)
 

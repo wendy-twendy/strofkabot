@@ -351,6 +351,8 @@ Output ONLY valid JSON with all fields."""
 
             # Build message attributes
             attrs = [f'author="{author}"', f'time="{timestamp}"']
+            if msg.get("is_bot"):
+                attrs.append('is_me="true"')
             if reply_to:
                 attrs.append(f'replying_to="{reply_to}"')
             if image_count > 0:

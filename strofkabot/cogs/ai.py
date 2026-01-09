@@ -99,7 +99,9 @@ class AICog(commands.Cog):
                 )
 
                 # Prepare text context from all messages
-                context_dicts = await prepare_context(messages, self._nicknames)
+                context_dicts = await prepare_context(
+                    messages, self._nicknames, bot_user_id=self.bot.user.id
+                )
 
                 # Extract images from: command message + last 5 context messages
                 recent_messages = [message]

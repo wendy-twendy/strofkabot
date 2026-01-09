@@ -246,7 +246,10 @@ class GeminiClient:
                 image_count = msg.get("image_count", 0)
                 image_info = f" [+{image_count} image(s)]" if image_count > 0 else ""
 
-                parts.append(f"[{timestamp}] {author}{reply_info}: {content}{image_info}")
+                me_indicator = " (you)" if msg.get("is_bot") else ""
+                parts.append(
+                    f"[{timestamp}] {author}{me_indicator}{reply_info}: {content}{image_info}"
+                )
 
             parts.append("\n--- End of History ---")
 
