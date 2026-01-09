@@ -209,20 +209,15 @@ CONTEXT ANALYSIS:
 - Are there images/videos being referenced?
 
 QUERY CLASSIFICATION:
-1. search (bool): Should web search be used? SET FALSE (default) unless NECESSARY.
-   SET FALSE for:
-   - Casual chat, jokes, sarcasm, rhetorical questions
-   - Questions answerable from the conversation context above
-   - General knowledge the AI already knows (common facts, definitions, how-tos)
-   - Opinions, advice, recommendations, creative requests
-   - Hypotheticals, "what if" scenarios
-   SET TRUE only when information REQUIRES external lookup:
-   - Breaking news, current events happening NOW
-   - Real-time data: weather, stock prices, sports scores, live results
-   - Very recent information (last few months) the AI wouldn't know
-   - Specific version numbers, release dates, API changes
-   - Obscure facts about lesser-known people, places, or things
+1. search (bool): Should web search be used? SET TRUE if:
+   - Current events, news, weather, prices, sports scores
+   - Questions about specific people, companies, products, or places
+   - Time-sensitive info: dates, deadlines, "latest", "current", "recent"
+   - Technical docs, API references, library versions, release dates
+   - Scientific data, statistics, research findings
+   - Geographic, demographic, or economic data
    - User explicitly asks to "search", "look up", or "find"
+   SET FALSE for: casual chat, jokes, opinions, general knowledge, context-based questions
 2. thinking (bool): Needs multi-step reasoning? (math, logic, "why", "analyze", comparisons)
 3. reasoning_effort: How much thinking is needed?
    - "minimal": Simple facts, definitions
