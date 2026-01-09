@@ -71,9 +71,12 @@ async def prepare_context(
     for msg in messages:
         reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(msg)
 
-        # Use nickname if available for reply-to author
+        # Use nickname if available for reply-to author, or "Llumi" for bot messages
         if reply_to_author and reply_to_author_id:
-            reply_to_author = get_display_name(reply_to_author_id, reply_to_author, nicknames)
+            if reply_to_author_id == bot_user_id:
+                reply_to_author = "Llumi"  # Use consistent bot name
+            else:
+                reply_to_author = get_display_name(reply_to_author_id, reply_to_author, nicknames)
 
         image_attachments = [att for att in msg.attachments if is_image_attachment(att.filename)]
 
@@ -238,7 +241,8 @@ Context: #{channel_name} | Asked by: {user_name} | {now.strftime('%B %d, %Y %H:%
 
     # Standard guidelines (always included)
     prompt_parts.append("""GUIDELINES:
-- Casual chat: ~500 chars. Complex explanations: longer as needed
+- Keep responses SHORT: ~250 chars for casual chat, expand only when genuinely necessary
+- Write naturally like a chat message - NO markdown headers, NO **bold labels** like "Facts:" or "Hot take:"
 - Reference chat history only when directly relevant
 - Cite sources when using web search results
 - If unsure about something from the conversation, say so
