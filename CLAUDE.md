@@ -68,7 +68,6 @@ strofkabot/
 ├── openrouter_client.py  # OpenRouter API client (primary AI)
 ├── image_processor.py    # Image compression and format handling
 ├── url_extractor.py      # URL detection in messages
-├── message_history_db.py # Message history database for AI context
 ├── cogs/                 # Discord command modules
 │   ├── base.py           # BaseCog - shared dependencies for all cogs
 │   ├── ai.py             # AICog - !ask, !predict commands
@@ -82,7 +81,8 @@ strofkabot/
 │   ├── attachments.py    # AttachmentsMixin - attachment storage
 │   ├── stats.py          # StatsMixin - user statistics queries
 │   ├── predictions.py    # PredictionsMixin - prediction tracking
-│   └── on_this_day.py    # OnThisDayMixin - historical lookups
+│   ├── on_this_day.py    # OnThisDayMixin - historical lookups
+│   └── message_history.py # MessageHistoryMixin - unfiltered message history for AI
 ├── tasks/
 │   ├── __init__.py
 │   └── update_tasks.py   # BackgroundTaskManager - DB/username update tasks
@@ -115,22 +115,15 @@ strofkabot/
 
 **Database Layer** (async SQLite via aiosqlite):
 
-The bot uses two separate databases:
-
-1. **Main Database** (`db.sqlite3`) - Mixin-based architecture in `strofkabot/db/`:
-   - `Database` class composes specialized mixins for separation of concerns
-   - `BaseDatabase` handles connection management and schema creation
-   - `MessagesMixin` - high-quality message operations
-   - `AttachmentsMixin` - image/file attachment storage
-   - `StatsMixin` - user statistics queries
-   - `PredictionsMixin` - prediction storage and retrieval
-   - `OnThisDayMixin` - historical message lookup
-
-2. **Message History Database** (`message_history.db`) via `message_history_db.py`:
-   - Stores ALL messages (unfiltered) for AI context
-   - Used by !ask command for conversation awareness
-   - Supports incremental scraping with progress tracking
-   - Provides hourly activity queries with timezone support
+Single unified database (`db.sqlite3`) with mixin-based architecture in `strofkabot/db/`:
+- `Database` class composes specialized mixins for separation of concerns
+- `BaseDatabase` handles connection management and schema creation
+- `MessagesMixin` - high-quality message operations (≥4 reactions)
+- `AttachmentsMixin` - image/file attachment storage
+- `StatsMixin` - user statistics queries
+- `PredictionsMixin` - prediction storage and retrieval
+- `OnThisDayMixin` - historical message lookup
+- `MessageHistoryMixin` - unfiltered message history for AI context (!ask command)
 
 **Business Logic**: `strofkabot/user_stats.py` - `UserStats` provides high-level methods:
 - Takes a `Database` instance, no direct SQL
@@ -160,17 +153,15 @@ The bot uses two separate databases:
 
 ### Key Database Tables
 
-**Main Database** (`db.sqlite3`):
+All tables are in a single database (`db.sqlite3`):
 - `messages` - High-quality messages (≥4 reactions) for !llumi command
+- `message_history` - All Discord messages (unfiltered) for AI context
 - `user_stats_monthly` - (author_id, year, month) → message count, reaction count
 - `user_reactions_monthly` - (giver_id, receiver_id, year, month) → reaction count
 - `user_replies_monthly` - (replier_id, replied_to_id, year, month) → reply count
 - `user_mapping` - author_id → display name cache
 - `attachments` - Stored images/files from high-quality messages
 - `predictions` - User predictions with target dates and retry tracking
-
-**Message History Database** (`message_history.db`):
-- `messages` - All Discord messages with full context (content, replies, reactions)
 - `scrape_progress` - Incremental scraping state per channel
 
 ### Discord Commands
@@ -189,8 +180,7 @@ All constants are centralized in `strofkabot/config.py`:
 - `GUILD_ID` - Discord server ID
 - `PREDICTIONS_CHANNEL_ID` - Channel for prediction posts
 - `UPDATE_INTERVAL_SECONDS` - Background task interval (24 hours)
-- `DATABASE_FILE_LOCATION` - Path to main SQLite database
-- `MESSAGE_HISTORY_DATABASE_FILE` - Path to message history database
+- `DATABASE_FILE_LOCATION` - Path to SQLite database
 - `ARTAN_QUOTES_PATH` - Path to quotes YAML file
 - `NICKNAMES_FILE` - Path to custom nicknames YAML
 - `ATTACHMENTS_DIR` - Directory for stored attachments

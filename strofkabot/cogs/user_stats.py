@@ -7,7 +7,7 @@ import re
 import discord
 from discord.ext import commands
 
-from strofkabot.message_history_db import MessageHistoryDatabase
+from strofkabot.discord_db import Database
 from strofkabot.user_stats import UserStats
 from strofkabot.utils import (
     adjust_month,
@@ -28,12 +28,12 @@ class UserStatsCog(commands.Cog):
         self,
         bot: commands.Bot,
         user_stats: UserStats,
-        message_history_db: MessageHistoryDatabase | None,
+        db: Database,
         logger: logging.Logger,
     ):
         self.bot = bot
         self.user_stats = user_stats
-        self.message_history_db = message_history_db
+        self.db = db
         self.logger = logger
 
     @commands.command(
@@ -90,7 +90,7 @@ class UserStatsCog(commands.Cog):
             @user: Mention a user to see their heatmap (default: self)
             --months N: Number of months to include (1-12, default: 3)
         """
-        if not self.message_history_db:
+        if not self.db:
             await ctx.send("Activity data is not available.")
             return
 
@@ -134,11 +134,11 @@ class UserStatsCog(commands.Cog):
             )
 
             # Ensure database is initialized
-            await self.message_history_db.ensure_connection()
+            await self.db.ensure_connection()
 
             # Fetch data for the month range
             activity_data = await fetch_hourly_activity_data_for_range(
-                self.message_history_db,
+                self.db,
                 target_user.id,
                 end_year,
                 end_month,

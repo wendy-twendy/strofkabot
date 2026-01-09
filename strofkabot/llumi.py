@@ -78,7 +78,7 @@ class LlumiBot(commands.Cog):
         user_stats_cog = UserStatsCog(
             self.bot,
             self.user_stats,
-            self.task_manager.message_history_db,
+            self.db,
             self.logger,
         )
         await self.bot.add_cog(user_stats_cog)

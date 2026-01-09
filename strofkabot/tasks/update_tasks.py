@@ -10,14 +10,12 @@ import discord
 
 from strofkabot.config import (
     ATTACHMENTS_DIR,
-    MESSAGE_HISTORY_DATABASE_FILE,
     PREDICTIONS_CHANNEL_ID,
     REACT_COUNT_THRESHOLD,
 )
-from strofkabot.discord_db import Attachment, Database, Message
+from strofkabot.discord_db import Attachment, Database, HistoryMessage, Message
 from strofkabot.image_processor import ImageProcessor
 from strofkabot.message_filter import MessageFilter
-from strofkabot.message_history_db import HistoryMessage, MessageHistoryDatabase
 from strofkabot.user_stats import UserStats
 from strofkabot.utils import get_reply_info
 
@@ -32,7 +30,6 @@ class BackgroundTaskManager:
         user_stats: UserStats,
         message_filter: MessageFilter,
         logger: logging.Logger,
-        message_history_db: MessageHistoryDatabase | None = None,
         image_processor: ImageProcessor | None = None,
     ):
         self.bot = bot
@@ -43,11 +40,6 @@ class BackgroundTaskManager:
         self.guild: discord.Guild | None = None
         self.react_count_threshold = REACT_COUNT_THRESHOLD
         self.last_username_update = datetime.datetime.min.replace(tzinfo=datetime.UTC)
-
-        # Message history database for AI purposes (unfiltered messages)
-        self.message_history_db = message_history_db or MessageHistoryDatabase(
-            MESSAGE_HISTORY_DATABASE_FILE
-        )
 
         # Image processor for downloading and compressing attachments
         self.image_processor = image_processor or ImageProcessor()
@@ -89,19 +81,14 @@ class BackgroundTaskManager:
         self.guild = guild
 
     async def close(self) -> None:
-        """Close database connections."""
-        if self.message_history_db:
-            await self.message_history_db.close()
-            self.logger.info("Message history database connection closed.")
+        """Close resources (no-op, database closed by LlumiBot)."""
+        pass
 
     async def update_db(self) -> None:
         """Update the database with new messages from all channels."""
         if not self.guild:
             self.logger.warning("Guild not set. Skipping database update.")
             return
-
-        # Initialize message history database
-        await self.message_history_db.initialize()
 
         current_time = datetime.datetime.now(datetime.UTC)
         scan_until = current_time - datetime.timedelta(days=1)
@@ -193,7 +180,7 @@ class BackgroundTaskManager:
 
                 # Batch insert history messages
                 if len(history_messages_to_insert) >= 100:
-                    await self.message_history_db.add_messages(history_messages_to_insert)
+                    await self.db.add_history_messages(history_messages_to_insert)
                     history_messages_to_insert.clear()
 
                 # Skip messages with no content for stats/quality filtering
@@ -283,7 +270,7 @@ class BackgroundTaskManager:
         # Always try to commit remaining batches (even after error)
         try:
             if history_messages_to_insert:
-                await self.message_history_db.add_messages(history_messages_to_insert)
+                await self.db.add_history_messages(history_messages_to_insert)
             if messages_to_insert:
                 await self.db.add_messages(messages_to_insert)
             if attachments_to_insert:
@@ -303,7 +290,7 @@ class BackgroundTaskManager:
 
         # Update message history scrape progress
         if last_message_id:
-            await self.message_history_db.update_scrape_progress(channel.id, last_message_id)
+            await self.db.update_scrape_progress(channel.id, last_message_id)
 
         if error_occurred:
             self.logger.warning(

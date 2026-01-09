@@ -189,7 +189,7 @@ async def fetch_hourly_activity_data(
     """Fetch hourly activity data for a user and format as 2D array.
 
     Args:
-        message_history_db: MessageHistoryDatabase instance.
+        message_history_db: Database instance (with MessageHistoryMixin).
         user_id: Discord user ID.
         timezone_offset: Hours offset from UTC.
 
@@ -223,7 +223,7 @@ async def fetch_hourly_activity_data_for_month(
     """Fetch hourly activity data for a user for a specific month.
 
     Args:
-        message_history_db: MessageHistoryDatabase instance.
+        message_history_db: Database instance (with MessageHistoryMixin).
         user_id: Discord user ID.
         year: Year to filter by.
         month: Month to filter by (1-12).
@@ -266,7 +266,7 @@ async def fetch_hourly_activity_data_for_range(
     """Fetch hourly activity data for a user for a range of months.
 
     Args:
-        message_history_db: MessageHistoryDatabase instance.
+        message_history_db: Database instance (with MessageHistoryMixin).
         user_id: Discord user ID.
         end_year: End year of the range.
         end_month: End month of the range (1-12).

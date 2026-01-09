@@ -21,10 +21,7 @@ class TestBackgroundTaskManagerInit:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             manager = BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
 
         assert manager.bot is bot
@@ -34,38 +31,6 @@ class TestBackgroundTaskManagerInit:
         assert manager.logger is logger
         assert manager.guild is None
 
-    def test_init_creates_message_history_db(self):
-        """Test that message history database is created."""
-        bot = MagicMock()
-        db = MagicMock()
-        user_stats = MagicMock()
-        message_filter = MagicMock()
-        logger = logging.getLogger("test")
-
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase") as MockHistoryDb,
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
-            manager = BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
-            MockHistoryDb.assert_called_once()
-            assert manager.message_history_db is not None
-
-    def test_init_uses_provided_message_history_db(self):
-        """Test that provided message history db is used."""
-        bot = MagicMock()
-        db = MagicMock()
-        user_stats = MagicMock()
-        message_filter = MagicMock()
-        logger = logging.getLogger("test")
-        custom_history_db = MagicMock()
-
-        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
-            manager = BackgroundTaskManager(
-                bot, db, user_stats, message_filter, logger, message_history_db=custom_history_db
-            )
-
-        assert manager.message_history_db is custom_history_db
-
     def test_init_creates_image_processor(self):
         """Test that image processor is created."""
         bot = MagicMock()
@@ -74,10 +39,7 @@ class TestBackgroundTaskManagerInit:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor") as MockImageProcessor,
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor") as MockImageProcessor:
             manager = BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
             MockImageProcessor.assert_called_once()
             assert manager.image_processor is not None
@@ -94,10 +56,7 @@ class TestSetGuild:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             manager = BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
 
         mock_guild = MagicMock()
@@ -109,27 +68,8 @@ class TestSetGuild:
 class TestClose:
     """Tests for close method."""
 
-    async def test_closes_message_history_db(self):
-        """Test that message history database is closed."""
-        bot = MagicMock()
-        db = MagicMock()
-        user_stats = MagicMock()
-        message_filter = MagicMock()
-        logger = logging.getLogger("test")
-        mock_history_db = MagicMock()
-        mock_history_db.close = AsyncMock()
-
-        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
-            manager = BackgroundTaskManager(
-                bot, db, user_stats, message_filter, logger, message_history_db=mock_history_db
-            )
-
-        await manager.close()
-
-        mock_history_db.close.assert_called_once()
-
-    async def test_handles_none_message_history_db(self):
-        """Test that None message history db is handled."""
+    async def test_close_is_noop(self):
+        """Test that close method is a no-op (database closed by LlumiBot)."""
         bot = MagicMock()
         db = MagicMock()
         user_stats = MagicMock()
@@ -137,10 +77,7 @@ class TestClose:
         logger = logging.getLogger("test")
 
         with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
-            manager = BackgroundTaskManager(
-                bot, db, user_stats, message_filter, logger, message_history_db=None
-            )
-            manager.message_history_db = None
+            manager = BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
 
         # Should not raise
         await manager.close()
@@ -155,16 +92,14 @@ class TestUpdateDb:
         db = MagicMock()
         db.get_last_scanned_timestamp = AsyncMock(return_value=None)
         db.update_last_scanned_timestamp = AsyncMock()
+        db.add_history_messages = AsyncMock()
+        db.update_scrape_progress = AsyncMock()
         user_stats = MagicMock()
         user_stats.batch_update_stats = AsyncMock()
         user_stats.batch_update_reaction_stats = AsyncMock()
         message_filter = MagicMock()
         message_filter.is_valid_message = MagicMock(return_value=True)
         logger = logging.getLogger("test")
-        mock_history_db = MagicMock()
-        mock_history_db.initialize = AsyncMock()
-        mock_history_db.add_messages = AsyncMock()
-        mock_history_db.update_scrape_progress = AsyncMock()
         mock_image_processor = MagicMock()
 
         manager = BackgroundTaskManager(
@@ -173,7 +108,6 @@ class TestUpdateDb:
             user_stats,
             message_filter,
             logger,
-            message_history_db=mock_history_db,
             image_processor=mock_image_processor,
         )
         return manager
@@ -186,16 +120,6 @@ class TestUpdateDb:
             await manager.update_db()
             mock_warning.assert_called_once()
             assert "Guild not set" in mock_warning.call_args[0][0]
-
-    async def test_initializes_message_history_db(self, manager):
-        """Test that message history db is initialized."""
-        mock_guild = MagicMock()
-        mock_guild.text_channels = []
-        manager.guild = mock_guild
-
-        await manager.update_db()
-
-        manager.message_history_db.initialize.assert_called_once()
 
     async def test_processes_accessible_channels(self, manager):
         """Test that only accessible channels are processed."""
@@ -232,15 +156,14 @@ class TestProcessChannel:
         db.add_attachments = AsyncMock()
         db.batch_upsert_reply_stats = AsyncMock()
         db.attachment_exists = AsyncMock(return_value=False)
+        db.add_history_messages = AsyncMock()
+        db.update_scrape_progress = AsyncMock()
         user_stats = MagicMock()
         user_stats.batch_update_stats = AsyncMock()
         user_stats.batch_update_reaction_stats = AsyncMock()
         message_filter = MagicMock()
         message_filter.is_valid_message = MagicMock(return_value=True)
         logger = logging.getLogger("test")
-        mock_history_db = MagicMock()
-        mock_history_db.add_messages = AsyncMock()
-        mock_history_db.update_scrape_progress = AsyncMock()
         mock_image_processor = MagicMock()
         mock_image_processor.is_image = MagicMock(return_value=False)
 
@@ -250,7 +173,6 @@ class TestProcessChannel:
             user_stats,
             message_filter,
             logger,
-            message_history_db=mock_history_db,
             image_processor=mock_image_processor,
         )
         manager.react_count_threshold = 4
@@ -299,7 +221,7 @@ class TestProcessChannel:
         await manager._process_channel(mock_channel, scan_until)
 
         # Should have added to history
-        manager.message_history_db.add_messages.assert_called()
+        manager.db.add_history_messages.assert_called()
 
     async def test_processes_high_reaction_messages(self, manager):
         """Test that high reaction messages are processed for quality."""
@@ -431,10 +353,7 @@ class TestCollectReactions:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             return BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
 
     async def test_collects_user_reactions(self, manager):
@@ -489,10 +408,7 @@ class TestGetAllReacts:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             return BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
 
     def test_sums_reaction_counts(self, manager):
@@ -530,10 +446,7 @@ class TestSerializeReactions:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             return BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
 
     def test_serializes_reactions_to_json(self, manager):
@@ -574,10 +487,7 @@ class TestUpdateUsernames:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             return BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
 
     async def test_skips_when_guild_not_set(self, manager):
@@ -658,10 +568,7 @@ class TestCheckPredictions:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             manager = BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
             manager.guild = MagicMock()
             return manager
@@ -688,7 +595,7 @@ class TestCheckPredictions:
         """Test that overdue predictions are posted."""
         from strofkabot.discord_db import Prediction
 
-        yesterday = datetime.date.today() - datetime.timedelta(days=1)
+        yesterday = datetime.datetime.now(datetime.UTC).date() - datetime.timedelta(days=1)
         mock_prediction = Prediction(
             id=1,
             author_id=12345,
@@ -741,7 +648,7 @@ class TestCheckPredictions:
         """Test that retry count is incremented on posting failure."""
         from strofkabot.discord_db import Prediction
 
-        yesterday = datetime.date.today() - datetime.timedelta(days=1)
+        yesterday = datetime.datetime.now(datetime.UTC).date() - datetime.timedelta(days=1)
         mock_prediction = Prediction(
             id=1,
             author_id=12345,
@@ -767,7 +674,7 @@ class TestCheckPredictions:
         """Test that prediction is given up after max retries."""
         from strofkabot.discord_db import Prediction
 
-        yesterday = datetime.date.today() - datetime.timedelta(days=1)
+        yesterday = datetime.datetime.now(datetime.UTC).date() - datetime.timedelta(days=1)
         mock_prediction = Prediction(
             id=1,
             author_id=12345,
@@ -803,10 +710,7 @@ class TestPostPrediction:
         message_filter = MagicMock()
         logger = logging.getLogger("test")
 
-        with (
-            patch("strofkabot.tasks.update_tasks.MessageHistoryDatabase"),
-            patch("strofkabot.tasks.update_tasks.ImageProcessor"),
-        ):
+        with patch("strofkabot.tasks.update_tasks.ImageProcessor"):
             manager = BackgroundTaskManager(bot, db, user_stats, message_filter, logger)
             manager.guild = MagicMock()
             return manager

@@ -267,22 +267,39 @@ class AICog(commands.Cog):
             user_name: Display name of the user.
         """
         try:
-            # Extract memories using the classifier
+            # Build known_users mapping from context (name -> id)
+            known_users: dict[str, int] = {}
+            # Also build reverse mapping for looking up names by id
+            id_to_name: dict[int, str] = {}
+
+            for msg in context_dicts:
+                author = msg.get("author")
+                author_id = msg.get("author_id")
+                if author and author_id and not msg.get("is_bot"):
+                    known_users[author.lower()] = author_id
+                    id_to_name[author_id] = author
+
+            # Add the asking user
+            known_users[user_name.lower()] = user_id
+            id_to_name[user_id] = user_name
+
+            # Extract memories using tool calling
             extracted = await self.openrouter_client.extract_memories(
-                context_dicts, question, response_text, user_id, user_name
+                context_dicts, question, response_text, user_id, user_name, known_users
             )
 
-            # Process user memories
+            # Process user memories (user_id already validated by tool schema)
             for mem_data in extracted.get("user_memories", []):
                 memory_text = mem_data.get("memory_text", "")
                 if not memory_text:
                     continue
 
-                target_user_id = mem_data.get("user_id", user_id)
-                # Get username from extraction, fallback to asking user's name if same user
-                target_user_name = mem_data.get("user_name")
-                if not target_user_name and target_user_id == user_id:
-                    target_user_name = user_name
+                target_user_id = mem_data.get("user_id")
+                if target_user_id is None:
+                    continue
+
+                # Get username from our mapping
+                target_user_name = id_to_name.get(target_user_id, user_name)
 
                 # Check for duplicates before adding
                 if await self.memory_store.is_duplicate_user_memory(target_user_id, memory_text):
@@ -291,13 +308,13 @@ class AICog(commands.Cog):
 
                 memory = Memory(
                     text=memory_text,
-                    category=mem_data.get("category", "general"),
+                    category=mem_data.get("category", "facts"),
                     importance=mem_data.get("importance", 5),
                 )
                 await self.memory_store.add_user_memory(target_user_id, memory, target_user_name)
-                self.logger.info(f"Saved user memory for {target_user_id}: {memory_text[:50]}")
+                self.logger.info(f"Saved user memory for {target_user_name}: {memory_text[:50]}")
 
-            # Process server memories
+            # Process server memories (importance >= 7 already enforced by tool schema)
             for mem_data in extracted.get("server_memories", []):
                 memory_text = mem_data.get("memory_text", "")
                 if not memory_text:
@@ -310,8 +327,8 @@ class AICog(commands.Cog):
 
                 memory = Memory(
                     text=memory_text,
-                    category=mem_data.get("category", "general"),
-                    importance=mem_data.get("importance", 5),
+                    category=mem_data.get("category", "knowledge"),
+                    importance=mem_data.get("importance", 7),
                 )
                 await self.memory_store.add_server_memory(memory)
                 self.logger.info(f"Saved server memory: {memory_text[:50]}")

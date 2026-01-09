@@ -1,16 +1,15 @@
-# message_history_db.py
+# db/message_history.py
 
-"""Database access layer for AI message history (unfiltered messages)."""
+"""Mixin for message history operations (unfiltered messages for AI context)."""
 
 import datetime
 from dataclasses import dataclass
-from pathlib import Path
-
-import aiosqlite
 
 
 @dataclass
 class HistoryMessage:
+    """Represents an unfiltered message for AI context."""
+
     id: int
     channel_id: int
     channel_name: str
@@ -24,59 +23,17 @@ class HistoryMessage:
     reactions: str  # JSON array of {emoji, count}
 
 
-class MessageHistoryDatabase:
-    """Database for storing all messages (unfiltered) for AI purposes."""
+class MessageHistoryMixin:
+    """Mixin providing message history operations for AI context."""
 
-    def __init__(self, db_path: Path):
-        self.db_path = db_path
-        self.conn: aiosqlite.Connection | None = None
-
-    async def initialize(self):
-        if self.conn is None:
-            self.conn = await aiosqlite.connect(str(self.db_path))
-            await self._create_tables()
-
-    async def ensure_connection(self):
-        if self.conn is None:
-            await self.initialize()
-
-    async def _create_tables(self):
-        await self.conn.executescript("""
-            CREATE TABLE IF NOT EXISTS messages (
-                id INTEGER PRIMARY KEY,
-                channel_id INTEGER,
-                channel_name TEXT,
-                author_id INTEGER,
-                author_name TEXT,
-                content TEXT,
-                timestamp TEXT,
-                reply_to_id INTEGER,
-                reply_to_author TEXT,
-                reply_to_content TEXT,
-                reactions TEXT
-            );
-
-            CREATE TABLE IF NOT EXISTS scrape_progress (
-                channel_id INTEGER PRIMARY KEY,
-                last_message_id INTEGER,
-                last_updated TEXT
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_messages_channel_id ON messages(channel_id);
-            CREATE INDEX IF NOT EXISTS idx_messages_timestamp ON messages(timestamp);
-            CREATE INDEX IF NOT EXISTS idx_messages_author_timestamp
-                ON messages(author_id, timestamp);
-        """)
-        await self.conn.commit()
-
-    async def add_messages(self, messages: list[HistoryMessage]):
-        """Batch insert messages."""
+    async def add_history_messages(self, messages: list[HistoryMessage]):
+        """Batch insert messages into message_history table."""
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
         async with self.conn.executemany(
             """
-            INSERT OR REPLACE INTO messages
+            INSERT OR REPLACE INTO message_history
             (id, channel_id, channel_name, author_id, author_name, content, timestamp,
              reply_to_id, reply_to_author, reply_to_content, reactions)
             VALUES (:id, :channel_id, :channel_name, :author_id, :author_name, :content, :timestamp,
@@ -128,12 +85,12 @@ class MessageHistoryDatabase:
         )
         await self.conn.commit()
 
-    async def get_message_count(self) -> int:
-        """Get total number of messages in the database."""
+    async def get_history_message_count(self) -> int:
+        """Get total number of messages in the message_history table."""
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
-        async with self.conn.execute("SELECT COUNT(*) FROM messages") as cursor:
+        async with self.conn.execute("SELECT COUNT(*) FROM message_history") as cursor:
             row = await cursor.fetchone()
             return row[0] if row else 0
 
@@ -163,7 +120,7 @@ class MessageHistoryDatabase:
                 CAST(strftime('%w', datetime(timestamp, ?)) AS INTEGER) as day_of_week,
                 CAST(strftime('%H', datetime(timestamp, ?)) AS INTEGER) as hour,
                 COUNT(*) as message_count
-            FROM messages
+            FROM message_history
             WHERE author_id = ?
               AND timestamp >= date('now', '-3 months')
             GROUP BY day_of_week, hour
@@ -202,7 +159,7 @@ class MessageHistoryDatabase:
                 CAST(strftime('%w', datetime(timestamp, ?)) AS INTEGER) as day_of_week,
                 CAST(strftime('%H', datetime(timestamp, ?)) AS INTEGER) as hour,
                 COUNT(*) as message_count
-            FROM messages
+            FROM message_history
             WHERE author_id = ?
               AND strftime('%Y', timestamp) = ?
               AND strftime('%m', timestamp) = ?
@@ -218,8 +175,3 @@ class MessageHistoryDatabase:
         ) as cursor:
             rows = await cursor.fetchall()
             return [(row[0], row[1], row[2]) for row in rows]
-
-    async def close(self):
-        if self.conn:
-            await self.conn.close()
-            self.conn = None

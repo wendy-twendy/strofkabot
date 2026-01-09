@@ -100,6 +100,33 @@ class BaseDatabase:
 
             CREATE INDEX IF NOT EXISTS idx_predictions_target_date
                 ON predictions(target_date, posted);
+
+            CREATE TABLE IF NOT EXISTS message_history (
+                id INTEGER PRIMARY KEY,
+                channel_id INTEGER,
+                channel_name TEXT,
+                author_id INTEGER,
+                author_name TEXT,
+                content TEXT,
+                timestamp TEXT,
+                reply_to_id INTEGER,
+                reply_to_author TEXT,
+                reply_to_content TEXT,
+                reactions TEXT
+            );
+
+            CREATE TABLE IF NOT EXISTS scrape_progress (
+                channel_id INTEGER PRIMARY KEY,
+                last_message_id INTEGER,
+                last_updated TEXT
+            );
+
+            CREATE INDEX IF NOT EXISTS idx_message_history_channel_id
+                ON message_history(channel_id);
+            CREATE INDEX IF NOT EXISTS idx_message_history_timestamp
+                ON message_history(timestamp);
+            CREATE INDEX IF NOT EXISTS idx_message_history_author_timestamp
+                ON message_history(author_id, timestamp);
         """)
         await self.conn.commit()
 

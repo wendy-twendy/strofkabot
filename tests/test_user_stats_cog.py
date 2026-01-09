@@ -16,25 +16,25 @@ class TestUserStatsCogInit:
         """Test that all dependencies are stored correctly."""
         bot = MagicMock()
         user_stats = MagicMock()
-        message_history_db = MagicMock()
+        db = MagicMock()
         logger = logging.getLogger("test")
 
-        cog = UserStatsCog(bot, user_stats, message_history_db, logger)
+        cog = UserStatsCog(bot, user_stats, db, logger)
 
         assert cog.bot is bot
         assert cog.user_stats is user_stats
-        assert cog.message_history_db is message_history_db
+        assert cog.db is db
         assert cog.logger is logger
 
-    def test_init_with_none_message_history_db(self):
-        """Test initialization with None message_history_db."""
+    def test_init_with_none_db(self):
+        """Test initialization with None db."""
         bot = MagicMock()
         user_stats = MagicMock()
         logger = logging.getLogger("test")
 
         cog = UserStatsCog(bot, user_stats, None, logger)
 
-        assert cog.message_history_db is None
+        assert cog.db is None
 
 
 class TestSendRpmStats:
@@ -44,9 +44,9 @@ class TestSendRpmStats:
     def cog(self):
         bot = MagicMock()
         user_stats = MagicMock()
-        message_history_db = MagicMock()
+        db = MagicMock()
         logger = logging.getLogger("test")
-        return UserStatsCog(bot, user_stats, message_history_db, logger)
+        return UserStatsCog(bot, user_stats, db, logger)
 
     @pytest.fixture
     def mock_ctx(self):
@@ -109,9 +109,9 @@ class TestShowMostLiked:
     def cog(self):
         bot = MagicMock()
         user_stats = MagicMock()
-        message_history_db = MagicMock()
+        db = MagicMock()
         logger = logging.getLogger("test")
-        return UserStatsCog(bot, user_stats, message_history_db, logger)
+        return UserStatsCog(bot, user_stats, db, logger)
 
     @pytest.fixture
     def mock_ctx(self):
@@ -157,9 +157,9 @@ class TestShowActivityHeatmap:
     def cog(self):
         bot = MagicMock()
         user_stats = MagicMock()
-        message_history_db = MagicMock()
+        db = MagicMock()
         logger = logging.getLogger("test")
-        return UserStatsCog(bot, user_stats, message_history_db, logger)
+        return UserStatsCog(bot, user_stats, db, logger)
 
     @pytest.fixture
     def mock_ctx(self):
@@ -172,8 +172,8 @@ class TestShowActivityHeatmap:
         ctx.send = AsyncMock()
         return ctx
 
-    async def test_activity_without_message_history_db(self, mock_ctx):
-        """Test activity command when message_history_db is None."""
+    async def test_activity_without_db(self, mock_ctx):
+        """Test activity command when db is None."""
         bot = MagicMock()
         user_stats = MagicMock()
         logger = logging.getLogger("test")
@@ -229,9 +229,9 @@ class TestSendActivityHeatmap:
     def cog(self):
         bot = MagicMock()
         user_stats = MagicMock()
-        message_history_db = AsyncMock()
+        db = AsyncMock()
         logger = logging.getLogger("test")
-        return UserStatsCog(bot, user_stats, message_history_db, logger)
+        return UserStatsCog(bot, user_stats, db, logger)
 
     @pytest.fixture
     def mock_ctx(self):

@@ -431,6 +431,99 @@ Example: {"relevant": [1, 3]} or {"relevant": []}"""
             # On error, return all memories rather than none
             return list(range(len(memories)))
 
+    def _build_memory_tools(self, known_users: dict[str, int]) -> list[dict]:
+        """Build tool definitions for memory extraction.
+
+        Args:
+            known_users: Mapping of display_name -> user_id for users in context.
+
+        Returns:
+            List of tool definitions for save_user_memory and save_server_memory.
+        """
+        # Build enum of valid user IDs from known users
+        user_enum = list(known_users.values())
+        user_descriptions = [f"{name} ({uid})" for name, uid in known_users.items()]
+
+        return [
+            {
+                "type": "function",
+                "function": {
+                    "name": "save_user_memory",
+                    "description": (
+                        "Save a long-term fact about a specific user. Only call for "
+                        "genuinely important, persistent facts. Valid users: "
+                        f"{', '.join(user_descriptions)}"
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "user_id": {
+                                "type": "integer",
+                                "enum": user_enum,
+                                "description": "Discord user ID - MUST be one of the known users",
+                            },
+                            "memory_text": {
+                                "type": "string",
+                                "description": (
+                                    "The fact to remember, in 3rd person present tense, "
+                                    "under 150 chars"
+                                ),
+                                "maxLength": 150,
+                            },
+                            "category": {
+                                "type": "string",
+                                "enum": ["preferences", "facts", "interests", "events"],
+                                "description": "Category of the memory",
+                            },
+                            "importance": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": 10,
+                                "description": (
+                                    "1-10, where 10 is very important. "
+                                    "Use 7+ only for truly significant facts."
+                                ),
+                            },
+                        },
+                        "required": ["user_id", "memory_text", "category", "importance"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
+                    "name": "save_server_memory",
+                    "description": (
+                        "Save shared knowledge about this Discord server/community. "
+                        "Only for recurring jokes, traditions, or unique cultural knowledge. "
+                        "VERY SELECTIVE - most conversations have nothing worth saving."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "memory_text": {
+                                "type": "string",
+                                "description": "The shared knowledge, under 150 chars",
+                                "maxLength": 150,
+                            },
+                            "category": {
+                                "type": "string",
+                                "enum": ["jokes", "memes", "knowledge", "events"],
+                                "description": "Category of the memory",
+                            },
+                            "importance": {
+                                "type": "integer",
+                                "minimum": 7,
+                                "maximum": 10,
+                                "description": "7-10 only. Server memories must be important (7+).",
+                            },
+                        },
+                        "required": ["memory_text", "category", "importance"],
+                    },
+                },
+            },
+        ]
+
     async def extract_memories(
         self,
         context_messages: list[dict],
@@ -438,95 +531,111 @@ Example: {"relevant": [1, 3]} or {"relevant": []}"""
         response_text: str,
         user_id: int,
         user_name: str,
+        known_users: dict[str, int] | None = None,
     ) -> dict:
-        """Extract new memories worth saving from a conversation.
+        """Extract new memories worth saving from a conversation using tool calling.
 
         Args:
             context_messages: List of context message dicts.
             question: The user's question.
-            response_text: The AI's response.
+            response_text: The AI's response (not used in extraction anymore).
             user_id: Discord ID of the user who asked.
             user_name: Display name of the user who asked.
+            known_users: Mapping of display_name -> user_id for users in context.
 
         Returns:
             Dict with "user_memories" and "server_memories" lists.
             Each memory has: user_id (for user memories), memory_text, category, importance.
         """
-        # Build context summary
+        # Build known_users if not provided (fallback to just the asker)
+        if known_users is None:
+            known_users = {user_name.lower(): user_id}
+
+        # Filter bot messages from context for extraction
         context_lines = []
-        for msg in context_messages[-10:]:  # Last 10 messages
+        for msg in context_messages[-10:]:
+            if msg.get("is_bot"):
+                continue
             author = msg.get("author", "Unknown")
             content = msg.get("content", "")[:200]
             context_lines.append(f"{author}: {content}")
 
         context_text = "\n".join(context_lines)
 
-        extraction_prompt = """You are a memory extractor for a Discord bot. Analyze this conversation and extract ONLY genuinely useful, long-term facts worth remembering.
+        # Build tools with current known users
+        tools = self._build_memory_tools(known_users)
 
-EXTRACT for USER MEMORIES (about individual users):
-- Personal preferences explicitly stated ("I hate X", "I love Y", "I prefer Z")
-- Factual info about them (profession, location, hobbies, skills)
-- Important life events (graduation, new job, moving, milestones)
-- Recurring interests mentioned multiple times
+        system_prompt = """You are a memory extractor for a Discord bot. Analyze the conversation and extract ONLY genuinely useful, long-term facts worth remembering.
 
-EXTRACT for SERVER MEMORIES (shared knowledge about this community):
-- Running jokes that multiple people reference
-- Server-specific memes or inside jokes
-- Important community events or traditions
-- Shared knowledge unique to this group
+RULES:
+- NEVER extract anything about the bot itself (Llumi, StrofkaBot)
+- Only extract facts explicitly stated, not speculation
+- User memories: personal preferences, facts about them, interests, life events
+- Server memories: ONLY recurring jokes or unique community knowledge (very rare)
+- Most conversations have NOTHING worth saving. When in doubt, don't save.
+- If importance would be below 5 for user memory or below 7 for server memory, don't save it.
 
-DO NOT EXTRACT:
-- Temporary topics (today's weather, current news, what they're doing right now)
-- One-time jokes without staying power
-- Generic conversation (greetings, "how are you", small talk)
-- Common knowledge everyone knows
-- Anything uncertain, speculative, or unclear
-
-For each memory:
-- Write in 3rd person, present tense: "Alice works as a teacher" not "Alice said she works"
-- Keep under 150 characters
-- Rate importance 1-10 (10 = very important fact, 1 = nice to know)
-- Assign category: preferences, facts, interests, events, jokes, memes, knowledge
-
-Output JSON:
-{
-  "user_memories": [
-    {"user_id": 123, "user_name": "Alice", "memory_text": "...", "category": "...", "importance": 7}
-  ],
-  "server_memories": [
-    {"memory_text": "...", "category": "...", "importance": 5}
-  ]
-}
-
-Return EMPTY ARRAYS if nothing is worth remembering. Most conversations have nothing worth saving - be very selective."""
+Call save_user_memory or save_server_memory tools ONLY if there's something genuinely worth remembering. It's perfectly fine to call no tools at all - that should be the default."""
 
         user_content = f"""Conversation context:
 {context_text}
 
-Current question from {user_name} (ID: {user_id}): {question}
+Question from {user_name}: {question}
 
-Bot response: {response_text[:500]}"""
+(Analyze the conversation above. Only save truly important, long-term facts.)"""
 
         try:
             response = await self._client.chat.completions.create(
                 model=OPENROUTER_ROUTER_MODEL,
                 messages=[
-                    {"role": "system", "content": extraction_prompt},
+                    {"role": "system", "content": system_prompt},
                     {"role": "user", "content": user_content},
                 ],
+                tools=tools,
+                tool_choice="auto",
                 temperature=0.1,
                 max_tokens=500,
-                response_format={"type": "json_object"},
             )
 
-            content = response.choices[0].message.content.strip()
-            result = json.loads(content)
+            # Process tool calls
+            user_memories = []
+            server_memories = []
 
-            user_memories = result.get("user_memories", [])
-            server_memories = result.get("server_memories", [])
+            message = response.choices[0].message
+            if message.tool_calls:
+                for tool_call in message.tool_calls:
+                    try:
+                        args = json.loads(tool_call.function.arguments)
+                    except json.JSONDecodeError:
+                        continue
+
+                    if tool_call.function.name == "save_user_memory":
+                        # Validate user_id is in known_users (defense in depth)
+                        if args.get("user_id") in known_users.values():
+                            user_memories.append(
+                                {
+                                    "user_id": args["user_id"],
+                                    "memory_text": args.get("memory_text", ""),
+                                    "category": args.get("category", "facts"),
+                                    "importance": args.get("importance", 5),
+                                }
+                            )
+
+                    elif tool_call.function.name == "save_server_memory":
+                        # Additional filter: reject bot-related memories
+                        text_lower = args.get("memory_text", "").lower()
+                        bot_indicators = ["strofkabot", "llumi", "the bot", "bot's"]
+                        if not any(x in text_lower for x in bot_indicators):
+                            server_memories.append(
+                                {
+                                    "memory_text": args.get("memory_text", ""),
+                                    "category": args.get("category", "knowledge"),
+                                    "importance": args.get("importance", 7),
+                                }
+                            )
 
             logger.debug(
-                "Memory extraction: %d user memories, %d server memories",
+                "Memory extraction (tools): %d user memories, %d server memories",
                 len(user_memories),
                 len(server_memories),
             )

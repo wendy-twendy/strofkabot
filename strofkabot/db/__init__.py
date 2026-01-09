@@ -4,6 +4,7 @@
 
 from strofkabot.db.attachments import Attachment, AttachmentsMixin
 from strofkabot.db.base import BaseDatabase
+from strofkabot.db.message_history import HistoryMessage, MessageHistoryMixin
 from strofkabot.db.messages import Message, MessagesMixin
 from strofkabot.db.on_this_day import OnThisDayMixin
 from strofkabot.db.predictions import Prediction, PredictionsMixin
@@ -16,6 +17,7 @@ class Database(
     StatsMixin,
     PredictionsMixin,
     OnThisDayMixin,
+    MessageHistoryMixin,
     BaseDatabase,
 ):
     """Unified database access layer combining all domain mixins."""
@@ -28,4 +30,5 @@ __all__ = [
     "Message",
     "Attachment",
     "Prediction",
+    "HistoryMessage",
 ]

@@ -7,6 +7,7 @@ with mocks might miss.
 """
 
 import datetime
+from unittest.mock import patch
 
 import discord.ext.test as dpytest
 import pytest
@@ -182,8 +183,13 @@ class TestCommandToDatabase:
         for content in contents:
             await message_factory(content=content)
 
-        # Execute command
-        await dpytest.message("!llumi")
+        # Mock random to avoid Easter egg (1/50 chance) and image selection
+        with patch("strofkabot.cogs.entertainment.random") as mock_random:
+            mock_random.randint.return_value = 2  # Not 1, so no Easter egg
+            mock_random.random.return_value = 0.6  # > 0.5, so message not image
+
+            # Execute command
+            await dpytest.message("!llumi")
 
         # Get the response message
         response = dpytest.get_message()

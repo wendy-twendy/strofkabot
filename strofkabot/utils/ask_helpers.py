@@ -84,6 +84,7 @@ async def prepare_context(
 
         context_entry = {
             "author": get_display_name(msg.author.id, msg.author.display_name, nicknames),
+            "author_id": msg.author.id,
             "content": msg.content or "[no text]",
             "timestamp": msg.created_at.strftime("%H:%M"),
             "reply_to_author": reply_to_author,

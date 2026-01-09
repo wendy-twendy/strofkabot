@@ -16,7 +16,6 @@ from strofkabot.discord_db import Database
 from strofkabot.image_processor import ImageProcessor
 from strofkabot.llumi import LlumiBot, setup_logging
 from strofkabot.message_filter import MessageFilter
-from strofkabot.message_history_db import MessageHistoryDatabase
 from strofkabot.tasks import BackgroundTaskManager
 from strofkabot.user_stats import UserStats
 
@@ -58,7 +57,6 @@ async def task_manager(mock_logger: logging.Logger):
     mock_db = AsyncMock(spec=Database)
     mock_user_stats = AsyncMock(spec=UserStats)
     mock_filter = MagicMock(spec=MessageFilter)
-    mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
     mock_image_processor = MagicMock(spec=ImageProcessor)
 
     manager = BackgroundTaskManager(
@@ -67,7 +65,6 @@ async def task_manager(mock_logger: logging.Logger):
         user_stats=mock_user_stats,
         message_filter=mock_filter,
         logger=mock_logger,
-        message_history_db=mock_history_db,
         image_processor=mock_image_processor,
     )
 
@@ -476,7 +473,6 @@ class TestProcessChannel:
         mock_db = AsyncMock(spec=Database)
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
-        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
         mock_image_processor = MagicMock(spec=ImageProcessor)
 
         manager = BackgroundTaskManager(
@@ -485,7 +481,6 @@ class TestProcessChannel:
             user_stats=mock_user_stats,
             message_filter=mock_filter,
             logger=mock_logger,
-            message_history_db=mock_history_db,
             image_processor=mock_image_processor,
         )
 
@@ -517,7 +512,7 @@ class TestProcessChannel:
         # Should not add stats for empty messages
         mock_user_stats.batch_update_stats.assert_not_called()
         # But should still record to message history
-        mock_history_db.add_messages.assert_called()
+        mock_db.add_history_messages.assert_called()
 
     @pytest.mark.asyncio
     async def test_process_channel_filters_low_reactions(self, mock_logger):
@@ -530,7 +525,6 @@ class TestProcessChannel:
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
         mock_filter.is_valid_message.return_value = True
-        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
         mock_image_processor = MagicMock(spec=ImageProcessor)
 
         manager = BackgroundTaskManager(
@@ -539,7 +533,6 @@ class TestProcessChannel:
             user_stats=mock_user_stats,
             message_filter=mock_filter,
             logger=mock_logger,
-            message_history_db=mock_history_db,
             image_processor=mock_image_processor,
         )
 
@@ -588,7 +581,6 @@ class TestProcessChannel:
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
         mock_filter.is_valid_message.return_value = False  # Filter rejects
-        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
         mock_image_processor = MagicMock(spec=ImageProcessor)
         mock_image_processor.is_image.return_value = False
 
@@ -598,7 +590,6 @@ class TestProcessChannel:
             user_stats=mock_user_stats,
             message_filter=mock_filter,
             logger=mock_logger,
-            message_history_db=mock_history_db,
             image_processor=mock_image_processor,
         )
 
@@ -671,7 +662,6 @@ class TestProcessChannel:
         mock_db = AsyncMock(spec=Database)
         mock_user_stats = AsyncMock(spec=UserStats)
         mock_filter = MagicMock(spec=MessageFilter)
-        mock_history_db = AsyncMock(spec=MessageHistoryDatabase)
         mock_image_processor = MagicMock(spec=ImageProcessor)
 
         manager = BackgroundTaskManager(
@@ -680,7 +670,6 @@ class TestProcessChannel:
             user_stats=mock_user_stats,
             message_filter=mock_filter,
             logger=mock_logger,
-            message_history_db=mock_history_db,
             image_processor=mock_image_processor,
         )
 

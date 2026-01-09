@@ -13,7 +13,6 @@ UPDATE_INTERVAL_SECONDS = 3600 * 24  # 24 hours
 DATABASE_FILE_LOCATION = Path(__file__).parent.parent / "data" / "db.sqlite3"
 ARTAN_QUOTES_PATH = Path(__file__).parent.parent / "data" / "artan_quotes.yaml"
 NICKNAMES_FILE = Path(__file__).parent.parent / "data" / "nicknames.yaml"
-MESSAGE_HISTORY_DATABASE_FILE = Path(__file__).parent.parent / "data" / "message_history.db"
 ATTACHMENTS_DIR = Path(__file__).parent.parent / "data" / "attachments"
 
 # Message filtering
@@ -36,9 +35,7 @@ GEMINI_USAGE_FILE = Path(__file__).parent.parent / "data" / "gemini_usage.json"
 
 # OpenRouter AI configuration (primary, uses free models)
 OPENROUTER_INFERENCE_MODEL = "google/gemini-3-flash-preview"  # Gemini Flash 3
-OPENROUTER_ROUTER_MODEL = (
-    "google/gemini-2.5-flash-lite-preview-09-2025"  # Fast classifier for search/thinking detection
-)
+OPENROUTER_ROUTER_MODEL = "google/gemini-3-flash-preview"  # Gemini Flash 3 for classification
 OPENROUTER_VISION_MODEL = "google/gemini-3-flash-preview"  # Vision model for images
 
 # Memory system configuration
