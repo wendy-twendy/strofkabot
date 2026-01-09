@@ -171,3 +171,4 @@ data/*.db
 data/*.sqlite3
 data/*.json
 data/attachments/
+data/memories/
