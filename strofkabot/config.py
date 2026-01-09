@@ -37,7 +37,7 @@ GEMINI_USAGE_FILE = Path(__file__).parent.parent / "data" / "gemini_usage.json"
 # OpenRouter AI configuration (primary, uses free models)
 OPENROUTER_INFERENCE_MODEL = "google/gemini-3-flash-preview"  # Gemini Flash 3
 OPENROUTER_ROUTER_MODEL = (
-    "xiaomi/mimo-v2-flash:free"  # Fast, free classifier for search/thinking detection
+    "google/gemini-2.5-flash-lite-preview-09-2025"  # Fast classifier for search/thinking detection
 )
 OPENROUTER_VISION_MODEL = "google/gemini-3-flash-preview"  # Vision model for images
 

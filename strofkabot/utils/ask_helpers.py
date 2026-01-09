@@ -5,15 +5,17 @@ from __future__ import annotations
 import base64
 import io
 import logging
+import tempfile
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
 import aiohttp
 import discord
+import imageio.v3 as iio
 from PIL import Image
 
-from strofkabot.image_processor import IMAGE_EXTENSIONS
+from strofkabot.image_processor import IMAGE_EXTENSIONS, VIDEO_EXTENSIONS
 from strofkabot.utils.discord_helpers import get_reply_info
 from strofkabot.utils.nickname_loader import get_display_name
 
@@ -97,13 +99,13 @@ async def prepare_context(
 async def extract_images_from_messages(
     messages: list[discord.Message],
 ) -> list[dict]:
-    """Extract and encode images from Discord messages.
+    """Extract and encode images (and video frames) from Discord messages.
 
     Args:
         messages: List of Discord messages to extract images from.
 
     Returns:
-        List of {data: base64, mime_type: str} for images.
+        List of {data: base64, mime_type: str} for images and video frames.
     """
     images = []
     for msg in messages:
@@ -112,12 +114,93 @@ async def extract_images_from_messages(
             image_data = await download_and_encode_image(att.url, att.filename)
             if image_data:
                 images.append(image_data)
+
+        video_attachments = [att for att in msg.attachments if is_video_attachment(att.filename)]
+        for att in video_attachments[:1]:  # Max 1 video per message
+            video_frames = await extract_video_frames(att.url, att.filename)
+            images.extend(video_frames)
     return images
 
 
 def is_image_attachment(filename: str) -> bool:
     """Check if a filename is an image based on extension."""
     return Path(filename).suffix.lower() in IMAGE_EXTENSIONS
+
+
+def is_video_attachment(filename: str) -> bool:
+    """Check if a filename is a video based on extension."""
+    return Path(filename).suffix.lower() in VIDEO_EXTENSIONS
+
+
+async def extract_video_frames(url: str, filename: str) -> list[dict]:
+    """Download video, extract 3 frames (first, middle, last), return as base64.
+
+    Frames are extracted at 0%, 50%, 100% positions.
+    Temporary files are deleted after processing.
+
+    Args:
+        url: URL to download the video from.
+        filename: Original filename (for extension detection).
+
+    Returns:
+        List of {data: base64_string, mime_type: str} for each frame, or empty list if failed.
+    """
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status != 200:
+                    logger.warning("Failed to download video %s: HTTP %d", url, response.status)
+                    return []
+
+                video_bytes = await response.read()
+
+        suffix = Path(filename).suffix.lower()
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=True) as tmp:
+            tmp.write(video_bytes)
+            tmp.flush()
+
+            props = iio.improps(tmp.name, plugin="pyav")
+            frame_count = props.n_images
+
+            if frame_count < 1:
+                logger.warning("Video has no frames: %s", filename)
+                return []
+
+            frame_indices = [0, frame_count // 2, frame_count - 1]
+            frames = []
+
+            for idx in frame_indices:
+                try:
+                    frame = iio.imread(tmp.name, index=idx, plugin="pyav")
+                    image = Image.fromarray(frame)
+
+                    if max(image.size) > MAX_IMAGE_DIMENSION:
+                        ratio = MAX_IMAGE_DIMENSION / max(image.size)
+                        new_size = (int(image.width * ratio), int(image.height * ratio))
+                        image = image.resize(new_size, Image.Resampling.LANCZOS)
+
+                    if image.mode in ("RGBA", "P"):
+                        image = image.convert("RGB")
+
+                    buffer = io.BytesIO()
+                    image.save(buffer, format="JPEG", quality=85)
+                    encoded = base64.b64encode(buffer.getvalue()).decode("utf-8")
+
+                    frames.append(
+                        {
+                            "data": encoded,
+                            "mime_type": "image/jpeg",
+                        }
+                    )
+                except Exception:
+                    logger.exception("Failed to extract frame %d from video: %s", idx, filename)
+
+            logger.debug("Extracted %d frames from video: %s", len(frames), filename)
+            return frames
+
+    except Exception:
+        logger.exception("Failed to process video: %s", url)
+        return []
 
 
 async def download_and_encode_image(url: str, filename: str) -> dict | None:
