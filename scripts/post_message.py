@@ -35,7 +35,13 @@ async def post_message(token: str, message: str):
         print(f"Message sent to #{channel.name} (ID: {sent.id})")
         await client.close()
 
-    await client.start(token)
+    try:
+        await client.start(token)
+    finally:
+        if not client.is_closed():
+            await client.close()
+        # Allow aiohttp to clean up connections
+        await asyncio.sleep(0.25)
 
 
 async def delete_message(token: str, message_id: int):
@@ -61,7 +67,12 @@ async def delete_message(token: str, message_id: int):
 
         await client.close()
 
-    await client.start(token)
+    try:
+        await client.start(token)
+    finally:
+        if not client.is_closed():
+            await client.close()
+        await asyncio.sleep(0.25)
 
 
 def main():
