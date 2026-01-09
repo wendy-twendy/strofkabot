@@ -12,6 +12,7 @@ UPDATE_INTERVAL_SECONDS = 3600 * 24  # 24 hours
 # File paths
 DATABASE_FILE_LOCATION = Path(__file__).parent.parent / "data" / "db.sqlite3"
 ARTAN_QUOTES_PATH = Path(__file__).parent.parent / "data" / "artan_quotes.yaml"
+NICKNAMES_FILE = Path(__file__).parent.parent / "data" / "nicknames.yaml"
 MESSAGE_HISTORY_DATABASE_FILE = Path(__file__).parent.parent / "data" / "message_history.db"
 ATTACHMENTS_DIR = Path(__file__).parent.parent / "data" / "attachments"
 

@@ -45,6 +45,7 @@ from strofkabot.utils.discord_helpers import (
     send_most_liked_stats,
     send_personal_stats,
 )
+from strofkabot.utils.nickname_loader import get_display_name, load_nicknames
 from strofkabot.utils.reaction_graph import (
     build_affinity_graph,
     build_reaction_graph,
@@ -96,6 +97,9 @@ __all__ = [
     # Date utilities
     "adjust_month",
     "parse_prediction_date",
+    # Nickname loader
+    "get_display_name",
+    "load_nicknames",
     # Discord helpers
     "calculate_average_preference_share",
     "format_clusters_report",

@@ -7,7 +7,7 @@ import logging
 import discord
 from discord.ext import commands
 
-from strofkabot.config import GEMINI_MAX_CONTEXT_MESSAGES
+from strofkabot.config import GEMINI_MAX_CONTEXT_MESSAGES, NICKNAMES_FILE
 from strofkabot.discord_db import Database
 from strofkabot.gemini_client import GeminiClient
 from strofkabot.openrouter_client import OpenRouterClient
@@ -17,6 +17,8 @@ from strofkabot.utils import (
     extract_images_from_messages,
     fetch_context_messages,
     format_error_response,
+    get_display_name,
+    load_nicknames,
     parse_prediction_date,
     prepare_context,
     split_response,
@@ -38,6 +40,7 @@ class AICog(commands.Cog):
         self._gemini_client: GeminiClient | None = None
         self._openrouter_client: OpenRouterClient | None = None
         self._ask_lock = asyncio.Lock()
+        self._nicknames = load_nicknames(NICKNAMES_FILE)
 
     @property
     def openrouter_client(self) -> OpenRouterClient | None:
@@ -109,7 +112,7 @@ class AICog(commands.Cog):
                     )
 
                     # Prepare text context from all messages
-                    context_dicts = await prepare_context(messages)
+                    context_dicts = await prepare_context(messages, self._nicknames)
 
                     # Extract images from: !ask message + last 2 context messages only
                     recent_messages = [ctx.message]
@@ -134,7 +137,9 @@ class AICog(commands.Cog):
                     system_prompt = build_system_prompt(
                         guild_name=ctx.guild.name if ctx.guild else "Direct Message",
                         channel_name=ctx.channel.name if hasattr(ctx.channel, "name") else "DM",
-                        user_name=ctx.author.display_name,
+                        user_name=get_display_name(
+                            ctx.author.id, ctx.author.display_name, self._nicknames
+                        ),
                         query_metadata=query_metadata,
                     )
 

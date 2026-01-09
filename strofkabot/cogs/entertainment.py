@@ -84,6 +84,35 @@ class EntertainmentCog(commands.Cog):
         await ctx.send(response)
         self.logger.info(f"Sent unsubscribe response: {response}")
 
+    @commands.command(name="ditaezeze", help="Sends Ditaezeze's message")
+    async def send_ditaezeze_response(self, ctx: commands.Context):
+        response = (
+            "Jo, nuk kam shume frike ate por the extent to which gjerat qe kam shkruar "
+            "mund te me prishin pune ne te ardhmen. Ky server nuk eshte politically "
+            "correct, to put it lightly, dhe une nuk e kam shume te sigurt te ardhmen "
+            "(nese do vazhdoj rrugen akademike ku reputacioni ka rendesi) dhe frika ime "
+            "eshte me teper ne lidhje me footprintin qe le ketu? Kjo ndodhi ate dite qe "
+            "ju permendet Lussy-in dhe thate qe dukej se ishte nje alt account i Ditusit. "
+            "Me frikesoi pak idea qe mund te kishte alt dhe troll accounte ketu dhe e "
+            "kerkova kush ishte ky Ditusi qe mund te kishte alt lussy-in dhe qe e "
+            "permendni ju dhe pashe qe ishin bere leaks nga ky server te Ditusi dhe tek "
+            "servera te tjere. Pastaj mu kujtua qe nje nate kishim biseduar me ty, "
+            "Qiron/altudon dhe Davin me duket, per pronarin e ketij serveri Jakun, i cili "
+            "ishte nje nder te paktet qe nuk e kishit zbuluar kush ishte. E kerkova dhe "
+            "ate dhe pashe qe ai kishte fshire gjithe channelin sepse nuk donte qe "
+            "mesazhet e tij ti perdoreshin kunder ne te ardhmen, qe ishte e cuditshme "
+            "pasi ju as nuk e njihnit. Une kur u futa tek r/albania e mora seriozisht ne "
+            "fillim (pak si shume:D) dhe kur erdha ketu e kuptova qe Fazan ishte nje "
+            "nivel me i larte nga ku krijoheshin psyop-et per subin qe ishte pak "
+            "mindblowing ne fillim haha. U ndjeva pak keshtu dhe per kete serverin ketu "
+            "pasi ne fund te fundit nuk ju njoh dhe ju nuk njihni tamam/keni besim as te "
+            "njeri tjetri. Plus, une kisha shume mesazhe vetem per nje jave 101, me "
+            "shume se ca veta qe kane ketu 1 vit dhe mu duk vetja si budallaqe qe "
+            "fola/zbulova kaq shume per kaq pak kohe."
+        )
+        await ctx.send(response)
+        self.logger.info("Sent ditaezeze response")
+
     @commands.command(name="artan", help="Sends a random quote from Artan's collection")
     async def send_artan_quote(self, ctx: commands.Context):
         if self.artan_quotes:

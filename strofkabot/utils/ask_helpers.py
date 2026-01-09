@@ -15,6 +15,7 @@ from PIL import Image
 
 from strofkabot.image_processor import IMAGE_EXTENSIONS
 from strofkabot.utils.discord_helpers import get_reply_info
+from strofkabot.utils.nickname_loader import get_display_name
 
 if TYPE_CHECKING:
     from strofkabot.openrouter_client import QueryMetadata
@@ -52,11 +53,13 @@ async def fetch_context_messages(
 
 async def prepare_context(
     messages: list[discord.Message],
+    nicknames: dict[int, list[str]] | None = None,
 ) -> list[dict]:
     """Prepare context messages for the AI (text only).
 
     Args:
         messages: List of Discord messages.
+        nicknames: Optional dict mapping user IDs to nickname lists.
 
     Returns:
         List of formatted message context dicts.
@@ -64,12 +67,16 @@ async def prepare_context(
     context = []
 
     for msg in messages:
-        reply_to_id, reply_to_author, reply_to_content, _ = get_reply_info(msg)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(msg)
+
+        # Use nickname if available for reply-to author
+        if reply_to_author and reply_to_author_id:
+            reply_to_author = get_display_name(reply_to_author_id, reply_to_author, nicknames)
 
         image_attachments = [att for att in msg.attachments if is_image_attachment(att.filename)]
 
         context_entry = {
-            "author": msg.author.display_name,
+            "author": get_display_name(msg.author.id, msg.author.display_name, nicknames),
             "content": msg.content or "[no text]",
             "timestamp": msg.created_at.strftime("%H:%M"),
             "reply_to_author": reply_to_author,
