@@ -363,3 +363,179 @@ Output ONLY valid JSON with all fields."""
 
         parts.append("</conversation>")
         return "\n".join(parts)
+
+    async def filter_relevant_memories(
+        self,
+        question: str,
+        memories: list,
+    ) -> list[int]:
+        """Filter memories to only those relevant to the current question.
+
+        Args:
+            question: The user's question.
+            memories: List of Memory objects to filter.
+
+        Returns:
+            List of indices of relevant memories (0-indexed).
+        """
+        if not memories:
+            return []
+
+        # Build numbered list of memories for the classifier
+        memory_list = "\n".join(f"{i + 1}. {mem.text}" for i, mem in enumerate(memories))
+
+        relevance_prompt = """Given a question and list of known facts about the user/server, identify which facts (if any) are DIRECTLY relevant and would help answer the question better.
+
+Be STRICT: only include facts that genuinely help answer THIS specific question.
+- If asking about food → dietary preferences are relevant
+- If asking about coding → programming interests/job are relevant
+- If casual chat with no clear connection → return empty array (don't force irrelevant info)
+
+Output JSON with a "relevant" field containing indices (1-indexed) of relevant facts.
+Example: {"relevant": [1, 3]} or {"relevant": []}"""
+
+        user_content = f"Question: {question}\n\nKnown facts:\n{memory_list}"
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=OPENROUTER_ROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": relevance_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.1,
+                max_tokens=200,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content.strip()
+            result = json.loads(content)
+            relevant_indices = result.get("relevant", [])
+
+            # Convert 1-indexed to 0-indexed and validate
+            valid_indices = []
+            for idx in relevant_indices:
+                if isinstance(idx, int) and 1 <= idx <= len(memories):
+                    valid_indices.append(idx - 1)
+
+            logger.debug(
+                "Memory relevance filter: %d/%d memories relevant",
+                len(valid_indices),
+                len(memories),
+            )
+
+            return valid_indices
+
+        except Exception as e:
+            logger.warning("Memory relevance filter failed (%s), returning all", e)
+            # On error, return all memories rather than none
+            return list(range(len(memories)))
+
+    async def extract_memories(
+        self,
+        context_messages: list[dict],
+        question: str,
+        response_text: str,
+        user_id: int,
+        user_name: str,
+    ) -> dict:
+        """Extract new memories worth saving from a conversation.
+
+        Args:
+            context_messages: List of context message dicts.
+            question: The user's question.
+            response_text: The AI's response.
+            user_id: Discord ID of the user who asked.
+            user_name: Display name of the user who asked.
+
+        Returns:
+            Dict with "user_memories" and "server_memories" lists.
+            Each memory has: user_id (for user memories), memory_text, category, importance.
+        """
+        # Build context summary
+        context_lines = []
+        for msg in context_messages[-10:]:  # Last 10 messages
+            author = msg.get("author", "Unknown")
+            content = msg.get("content", "")[:200]
+            context_lines.append(f"{author}: {content}")
+
+        context_text = "\n".join(context_lines)
+
+        extraction_prompt = """You are a memory extractor for a Discord bot. Analyze this conversation and extract ONLY genuinely useful, long-term facts worth remembering.
+
+EXTRACT for USER MEMORIES (about individual users):
+- Personal preferences explicitly stated ("I hate X", "I love Y", "I prefer Z")
+- Factual info about them (profession, location, hobbies, skills)
+- Important life events (graduation, new job, moving, milestones)
+- Recurring interests mentioned multiple times
+
+EXTRACT for SERVER MEMORIES (shared knowledge about this community):
+- Running jokes that multiple people reference
+- Server-specific memes or inside jokes
+- Important community events or traditions
+- Shared knowledge unique to this group
+
+DO NOT EXTRACT:
+- Temporary topics (today's weather, current news, what they're doing right now)
+- One-time jokes without staying power
+- Generic conversation (greetings, "how are you", small talk)
+- Common knowledge everyone knows
+- Anything uncertain, speculative, or unclear
+
+For each memory:
+- Write in 3rd person, present tense: "Alice works as a teacher" not "Alice said she works"
+- Keep under 150 characters
+- Rate importance 1-10 (10 = very important fact, 1 = nice to know)
+- Assign category: preferences, facts, interests, events, jokes, memes, knowledge
+
+Output JSON:
+{
+  "user_memories": [
+    {"user_id": 123, "user_name": "Alice", "memory_text": "...", "category": "...", "importance": 7}
+  ],
+  "server_memories": [
+    {"memory_text": "...", "category": "...", "importance": 5}
+  ]
+}
+
+Return EMPTY ARRAYS if nothing is worth remembering. Most conversations have nothing worth saving - be very selective."""
+
+        user_content = f"""Conversation context:
+{context_text}
+
+Current question from {user_name} (ID: {user_id}): {question}
+
+Bot response: {response_text[:500]}"""
+
+        try:
+            response = await self._client.chat.completions.create(
+                model=OPENROUTER_ROUTER_MODEL,
+                messages=[
+                    {"role": "system", "content": extraction_prompt},
+                    {"role": "user", "content": user_content},
+                ],
+                temperature=0.1,
+                max_tokens=500,
+                response_format={"type": "json_object"},
+            )
+
+            content = response.choices[0].message.content.strip()
+            result = json.loads(content)
+
+            user_memories = result.get("user_memories", [])
+            server_memories = result.get("server_memories", [])
+
+            logger.debug(
+                "Memory extraction: %d user memories, %d server memories",
+                len(user_memories),
+                len(server_memories),
+            )
+
+            return {
+                "user_memories": user_memories,
+                "server_memories": server_memories,
+            }
+
+        except Exception as e:
+            logger.warning("Memory extraction failed (%s)", e)
+            return {"user_memories": [], "server_memories": []}

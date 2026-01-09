@@ -40,7 +40,7 @@ async def llumi_cog(tmp_path: Path, mock_logger: logging.Logger):
     quotes_file.write_text('- "Test quote"\n')
     mock_artan = ArtanQuotes(quotes_file)
 
-    cog = LlumiBot(bot, mock_db, mock_user_stats, mock_artan, mock_logger)
+    cog = LlumiBot(bot, mock_db, mock_user_stats, mock_artan, None, mock_logger)
 
     yield cog, mock_db, mock_user_stats
 

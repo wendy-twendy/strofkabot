@@ -40,3 +40,10 @@ OPENROUTER_ROUTER_MODEL = (
     "xiaomi/mimo-v2-flash:free"  # Fast, free classifier for search/thinking detection
 )
 OPENROUTER_VISION_MODEL = "google/gemini-3-flash-preview"  # Vision model for images
+
+# Memory system configuration
+MEMORIES_DIR = Path(__file__).parent.parent / "data" / "memories"
+MEMORY_USER_LIMIT = 20  # Max memories per user
+MEMORY_SERVER_LIMIT = 50  # Max server-wide memories
+MEMORY_TEXT_MAX_LENGTH = 200  # Max characters per memory
+MEMORY_INJECTION_ENABLED = False  # Set to True to inject memories into prompts

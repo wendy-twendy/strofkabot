@@ -49,7 +49,7 @@ async def llumi_cog(mock_dependencies):
     bot = commands.Bot(command_prefix="!", intents=intents)
     await bot._async_setup_hook()
 
-    cog = LlumiBot(bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
+    cog = LlumiBot(bot, mock_db, mock_user_stats, artan_quotes, None, mock_logger)
     return cog, mock_db, mock_user_stats, mock_logger
 
 
@@ -109,7 +109,7 @@ class TestOnReady:
         mock_guild.name = "Test Guild"
         mock_bot.get_guild.return_value = mock_guild
 
-        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
+        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, None, mock_logger)
         # Mock the task methods to prevent actual task starting
         cog.update_db_task = MagicMock()
         cog.update_usernames_task = MagicMock()
@@ -130,7 +130,7 @@ class TestOnReady:
         mock_bot.user.__str__ = lambda self: "TestBot#1234"
         mock_bot.get_guild.return_value = None  # Guild not found
 
-        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
+        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, None, mock_logger)
 
         await cog.on_ready()
 
@@ -152,7 +152,7 @@ class TestOnReady:
         mock_guild.name = "Test Guild"
         mock_bot.get_guild.return_value = mock_guild
 
-        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, mock_logger)
+        cog = LlumiBot(mock_bot, mock_db, mock_user_stats, artan_quotes, None, mock_logger)
         # Mock the task start methods
         cog.update_db_task = MagicMock()
         cog.update_usernames_task = MagicMock()

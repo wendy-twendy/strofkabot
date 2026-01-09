@@ -7,9 +7,16 @@ import logging
 import discord
 from discord.ext import commands
 
-from strofkabot.config import GEMINI_MAX_CONTEXT_MESSAGES, NICKNAMES_FILE
+from strofkabot.config import (
+    GEMINI_MAX_CONTEXT_MESSAGES,
+    MEMORY_INJECTION_ENABLED,
+    MEMORY_SERVER_LIMIT,
+    MEMORY_USER_LIMIT,
+    NICKNAMES_FILE,
+)
 from strofkabot.discord_db import Database
 from strofkabot.gemini_client import GeminiClient
+from strofkabot.memory_store import Memory, MemoryStore
 from strofkabot.openrouter_client import OpenRouterClient
 from strofkabot.url_extractor import extract_urls_from_messages, format_url_context
 from strofkabot.utils import (
@@ -33,10 +40,12 @@ class AICog(commands.Cog):
         bot: commands.Bot,
         db: Database,
         logger: logging.Logger,
+        memory_store: MemoryStore | None = None,
     ):
         self.bot = bot
         self.db = db
         self.logger = logger
+        self.memory_store = memory_store
         self._gemini_client: GeminiClient | None = None
         self._openrouter_client: OpenRouterClient | None = None
         self._channel_locks: dict[int, asyncio.Lock] = {}
@@ -88,6 +97,7 @@ class AICog(commands.Cog):
         channel = message.channel
         author = message.author
         guild = message.guild
+        user_name = get_display_name(author.id, author.display_name, self._nicknames)
 
         async with channel.typing():
             try:
@@ -123,11 +133,46 @@ class AICog(commands.Cog):
                         question, context_dicts
                     )
 
+                # Load and filter relevant memories (only if injection is enabled)
+                relevant_user_memories = []
+                relevant_server_memories = []
+                if MEMORY_INJECTION_ENABLED and self.memory_store and self.openrouter_client:
+                    # Load all memories
+                    all_user_memories = await self.memory_store.get_user_memories(author.id)
+                    all_server_memories = await self.memory_store.get_server_memories()
+
+                    # Combine for relevance filtering
+                    all_memories = all_user_memories + all_server_memories
+
+                    if all_memories:
+                        # Filter to only relevant memories
+                        relevant_indices = await self.openrouter_client.filter_relevant_memories(
+                            question, all_memories
+                        )
+
+                        # Split back into user/server memories
+                        user_count = len(all_user_memories)
+                        for idx in relevant_indices:
+                            if idx < user_count:
+                                relevant_user_memories.append(all_user_memories[idx])
+                            else:
+                                relevant_server_memories.append(
+                                    all_server_memories[idx - user_count]
+                                )
+
+                        # Mark relevant memories as accessed
+                        for mem in relevant_user_memories:
+                            await self.memory_store.mark_user_memory_accessed(author.id, mem.text)
+                        for mem in relevant_server_memories:
+                            await self.memory_store.mark_server_memory_accessed(mem.text)
+
                 system_prompt = build_system_prompt(
                     guild_name=guild.name if guild else "Direct Message",
                     channel_name=channel.name if hasattr(channel, "name") else "DM",
-                    user_name=get_display_name(author.id, author.display_name, self._nicknames),
+                    user_name=user_name,
                     query_metadata=query_metadata,
+                    user_memories=relevant_user_memories if relevant_user_memories else None,
+                    server_memories=relevant_server_memories if relevant_server_memories else None,
                 )
 
                 response = None
@@ -188,9 +233,95 @@ class AICog(commands.Cog):
                     + (" (fallback)" if used_fallback else "")
                 )
 
+                # Schedule async memory extraction (non-blocking)
+                if self.memory_store and self.openrouter_client and not used_fallback:
+                    asyncio.create_task(
+                        self._extract_and_save_memories(
+                            context_dicts,
+                            question,
+                            response.text,
+                            author.id,
+                            user_name,
+                        )
+                    )
+
             except Exception:
                 self.logger.exception("Unexpected error in ask handler")
                 await channel.send(format_error_response("api"))
+
+    async def _extract_and_save_memories(
+        self,
+        context_dicts: list[dict],
+        question: str,
+        response_text: str,
+        user_id: int,
+        user_name: str,
+    ) -> None:
+        """Extract memories from conversation and save them (runs in background).
+
+        Args:
+            context_dicts: List of context message dicts.
+            question: The user's question.
+            response_text: The AI's response.
+            user_id: Discord ID of the user who asked.
+            user_name: Display name of the user.
+        """
+        try:
+            # Extract memories using the classifier
+            extracted = await self.openrouter_client.extract_memories(
+                context_dicts, question, response_text, user_id, user_name
+            )
+
+            # Process user memories
+            for mem_data in extracted.get("user_memories", []):
+                memory_text = mem_data.get("memory_text", "")
+                if not memory_text:
+                    continue
+
+                target_user_id = mem_data.get("user_id", user_id)
+                # Get username from extraction, fallback to asking user's name if same user
+                target_user_name = mem_data.get("user_name")
+                if not target_user_name and target_user_id == user_id:
+                    target_user_name = user_name
+
+                # Check for duplicates before adding
+                if await self.memory_store.is_duplicate_user_memory(target_user_id, memory_text):
+                    self.logger.debug(f"Skipping duplicate user memory: {memory_text[:50]}")
+                    continue
+
+                memory = Memory(
+                    text=memory_text,
+                    category=mem_data.get("category", "general"),
+                    importance=mem_data.get("importance", 5),
+                )
+                await self.memory_store.add_user_memory(target_user_id, memory, target_user_name)
+                self.logger.info(f"Saved user memory for {target_user_id}: {memory_text[:50]}")
+
+            # Process server memories
+            for mem_data in extracted.get("server_memories", []):
+                memory_text = mem_data.get("memory_text", "")
+                if not memory_text:
+                    continue
+
+                # Check for duplicates before adding
+                if await self.memory_store.is_duplicate_server_memory(memory_text):
+                    self.logger.debug(f"Skipping duplicate server memory: {memory_text[:50]}")
+                    continue
+
+                memory = Memory(
+                    text=memory_text,
+                    category=mem_data.get("category", "general"),
+                    importance=mem_data.get("importance", 5),
+                )
+                await self.memory_store.add_server_memory(memory)
+                self.logger.info(f"Saved server memory: {memory_text[:50]}")
+
+            # Prune if needed
+            await self.memory_store.prune_user_memories(user_id, limit=MEMORY_USER_LIMIT)
+            await self.memory_store.prune_server_memories(limit=MEMORY_SERVER_LIMIT)
+
+        except Exception:
+            self.logger.exception("Error in memory extraction")
 
     @commands.command(
         name="ask",

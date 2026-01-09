@@ -23,9 +23,11 @@ from strofkabot.config import (
     ARTAN_QUOTES_PATH,
     DATABASE_FILE_LOCATION,
     GUILD_ID,
+    MEMORIES_DIR,
     UPDATE_INTERVAL_SECONDS,
 )
 from strofkabot.discord_db import Database
+from strofkabot.memory_store import MemoryStore
 from strofkabot.message_filter import MessageFilter
 from strofkabot.tasks import BackgroundTaskManager
 from strofkabot.user_stats import UserStats
@@ -42,12 +44,14 @@ class LlumiBot(commands.Cog):
         db: Database,
         user_stats: UserStats,
         artan_quotes: ArtanQuotes | None,
+        memory_store: MemoryStore | None,
         logger: logging.Logger,
     ):
         self.bot = bot
         self.db = db
         self.user_stats = user_stats
         self.artan_quotes = artan_quotes
+        self.memory_store = memory_store
         self.logger = logger
         self.guild = None
 
@@ -61,6 +65,11 @@ class LlumiBot(commands.Cog):
 
     async def cog_load(self):
         await self.db.initialize()
+
+        # Initialize memory store
+        if self.memory_store:
+            await self.memory_store.initialize()
+            self.logger.info("Memory store initialized")
 
         # Load all cogs
         entertainment_cog = EntertainmentCog(self.bot, self.db, self.artan_quotes, self.logger)
@@ -80,7 +89,7 @@ class LlumiBot(commands.Cog):
         self._network_cog = NetworkCog(self.bot, self.db, self.user_stats, None, self.logger)
         await self.bot.add_cog(self._network_cog)
 
-        ai_cog = AICog(self.bot, self.db, self.logger)
+        ai_cog = AICog(self.bot, self.db, self.logger, memory_store=self.memory_store)
         await self.bot.add_cog(ai_cog)
 
         self.logger.info("All cogs loaded successfully")
@@ -168,6 +177,7 @@ async def main():
 
     db = Database(DATABASE_FILE_LOCATION)
     user_stats = UserStats(db)
+    memory_store = MemoryStore(MEMORIES_DIR)
 
     try:
         artan_quotes = ArtanQuotes(ARTAN_QUOTES_PATH)
@@ -176,7 +186,7 @@ async def main():
         logger.error(f"Error during the initialization of Artan quotes: {error}")
         artan_quotes = None
 
-    await bot.add_cog(LlumiBot(bot, db, user_stats, artan_quotes, logger))
+    await bot.add_cog(LlumiBot(bot, db, user_stats, artan_quotes, memory_store, logger))
 
     token = os.getenv("LLUMI_BOT_TOKEN")
     shutdown_event = asyncio.Event()

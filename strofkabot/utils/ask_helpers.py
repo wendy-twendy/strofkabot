@@ -172,6 +172,8 @@ def build_system_prompt(
     channel_name: str,
     user_name: str,
     query_metadata: QueryMetadata | None = None,
+    user_memories: list | None = None,
+    server_memories: list | None = None,
 ) -> str:
     """Build a dynamic, context-aware system prompt.
 
@@ -180,6 +182,8 @@ def build_system_prompt(
         channel_name: Name of the current channel.
         user_name: Display name of the user asking.
         query_metadata: Optional metadata from query classification.
+        user_memories: Optional list of relevant Memory objects about the user.
+        server_memories: Optional list of relevant Memory objects about the server.
 
     Returns:
         Formatted system prompt string.
@@ -193,6 +197,21 @@ def build_system_prompt(
 Context: #{channel_name} | Asked by: {user_name} | {now.strftime('%B %d, %Y %H:%M UTC')}"""
 
     prompt_parts = [base]
+
+    # Inject relevant memories (only if provided and non-empty)
+    if user_memories or server_memories:
+        memory_lines = ["CONTEXT FROM PREVIOUS CONVERSATIONS:"]
+        if user_memories:
+            memory_lines.append(f"About {user_name}:")
+            for mem in user_memories:
+                memory_lines.append(f"  - {mem.text}")
+        if server_memories:
+            memory_lines.append("About this server:")
+            for mem in server_memories:
+                memory_lines.append(f"  - {mem.text}")
+        memory_lines.append("")
+        memory_lines.append("Use this naturally if it helps. Don't mention it otherwise.")
+        prompt_parts.append("\n".join(memory_lines))
 
     # Add dynamic instructions based on query metadata
     if query_metadata:

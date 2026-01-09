@@ -20,7 +20,7 @@ class TestLlumiBotInit:
         logger = logging.getLogger("test")
 
         with patch("strofkabot.llumi.BackgroundTaskManager"):
-            cog = LlumiBot(bot, db, user_stats, artan_quotes, logger)
+            cog = LlumiBot(bot, db, user_stats, artan_quotes, None, logger)
 
         assert cog.bot is bot
         assert cog.db is db
@@ -37,7 +37,7 @@ class TestLlumiBotInit:
         logger = logging.getLogger("test")
 
         with patch("strofkabot.llumi.BackgroundTaskManager") as MockTaskManager:
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
             MockTaskManager.assert_called_once()
             assert cog.task_manager is not None
 
@@ -56,7 +56,7 @@ class TestCogLoad:
         logger = logging.getLogger("test")
 
         with patch("strofkabot.llumi.BackgroundTaskManager"):
-            return LlumiBot(bot, db, user_stats, artan_quotes, logger)
+            return LlumiBot(bot, db, user_stats, artan_quotes, None, logger)
 
     async def test_initializes_database(self, cog):
         """Test that database is initialized."""
@@ -101,7 +101,7 @@ class TestCogUnload:
             mock_task_manager.close = AsyncMock()
             MockTaskManager.return_value = mock_task_manager
 
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
             await cog.cog_unload()
 
             mock_task_manager.close.assert_called_once()
@@ -123,7 +123,7 @@ class TestOnReady:
         with patch("strofkabot.llumi.BackgroundTaskManager") as MockTaskManager:
             mock_task_manager = MagicMock()
             MockTaskManager.return_value = mock_task_manager
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
             # Mock the task loops
             cog.update_db_task = MagicMock()
             cog.update_usernames_task = MagicMock()
@@ -208,7 +208,7 @@ class TestUpdateDbTask:
             mock_task_manager.update_db = AsyncMock()
             MockTaskManager.return_value = mock_task_manager
 
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
             # Call the underlying coroutine directly
             await cog.update_db_task.coro(cog)
 
@@ -226,7 +226,7 @@ class TestUpdateDbTask:
             mock_task_manager.update_db = AsyncMock(side_effect=Exception("DB error"))
             MockTaskManager.return_value = mock_task_manager
 
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
 
             with patch.object(cog.logger, "exception") as mock_exception:
                 await cog.update_db_task.coro(cog)
@@ -248,7 +248,7 @@ class TestUpdateUsernamesTask:
             mock_task_manager.update_usernames = AsyncMock()
             MockTaskManager.return_value = mock_task_manager
 
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
             await cog.update_usernames_task.coro(cog)
 
             mock_task_manager.update_usernames.assert_called_once()
@@ -265,7 +265,7 @@ class TestUpdateUsernamesTask:
             mock_task_manager.update_usernames = AsyncMock(side_effect=Exception("Error"))
             MockTaskManager.return_value = mock_task_manager
 
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
 
             with patch.object(cog.logger, "exception") as mock_exception:
                 await cog.update_usernames_task.coro(cog)
@@ -287,7 +287,7 @@ class TestCheckPredictionsTask:
             mock_task_manager.check_predictions = AsyncMock()
             MockTaskManager.return_value = mock_task_manager
 
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
             await cog.check_predictions_task.coro(cog)
 
             mock_task_manager.check_predictions.assert_called_once()
@@ -304,7 +304,7 @@ class TestCheckPredictionsTask:
             mock_task_manager.check_predictions = AsyncMock(side_effect=Exception("Error"))
             MockTaskManager.return_value = mock_task_manager
 
-            cog = LlumiBot(bot, db, user_stats, None, logger)
+            cog = LlumiBot(bot, db, user_stats, None, None, logger)
 
             with patch.object(cog.logger, "exception") as mock_exception:
                 await cog.check_predictions_task.coro(cog)

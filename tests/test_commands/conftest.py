@@ -50,7 +50,7 @@ async def bot_with_mocked_db(tmp_path: Path, mock_logger: logging.Logger):
     quotes_file.write_text('- "Test quote 1"\n- "Test quote 2"\n')
     mock_artan = ArtanQuotes(quotes_file)
 
-    cog = LlumiBot(b, mock_db, mock_user_stats, mock_artan, mock_logger)
+    cog = LlumiBot(b, mock_db, mock_user_stats, mock_artan, None, mock_logger)
     await b.add_cog(cog)
 
     dpytest.configure(b)

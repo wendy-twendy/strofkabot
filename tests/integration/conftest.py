@@ -196,7 +196,7 @@ async def bot_with_real_db(
     quotes_file.write_text('- "Integration test quote 1"\n- "Integration test quote 2"\n')
     artan_quotes = ArtanQuotes(quotes_file)
 
-    cog = LlumiBot(bot, real_database, real_user_stats, artan_quotes, integration_logger)
+    cog = LlumiBot(bot, real_database, real_user_stats, artan_quotes, None, integration_logger)
     await bot.add_cog(cog)
 
     dpytest.configure(bot)
