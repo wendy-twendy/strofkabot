@@ -260,7 +260,7 @@ Context: #{channel_name} | Asked by: {user_name} | {now.strftime('%B %d, %Y %H:%
 
     # Standard guidelines (always included)
     prompt_parts.append("""GUIDELINES:
-- Keep responses SHORT: ~250 chars for casual chat, expand only when genuinely necessary
+- Keep responses SHORT: ~300 chars for casual chat, expand only when genuinely necessary
 - Write naturally like a chat message - NO markdown headers, NO **bold labels** like "Facts:" or "Hot take:"
 - Reference chat history only when directly relevant
 - Cite sources when using web search results
