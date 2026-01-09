@@ -136,32 +136,31 @@ class TestSplitResponse:
 class TestFormatErrorResponse:
     """Tests for error message formatting."""
 
-    def test_no_question_error(self):
-        """Test no question error message."""
-        msg = format_error_response("no_question")
-        assert "!ask" in msg
-        assert "question" in msg.lower()
+    @pytest.mark.parametrize(
+        "error_type,expected_substring",
+        [
+            pytest.param("no_question", "!ask", id="no-question-mentions-command"),
+            pytest.param("rate_limit", "wait", id="rate-limit-suggests-waiting"),
+            pytest.param("config", "configured", id="config-mentions-configuration"),
+            pytest.param("too_long", "20,000", id="too-long-shows-limit"),
+            pytest.param("exhausted", "tomorrow", id="exhausted-mentions-tomorrow"),
+            pytest.param("unknown_type", "wrong", id="unknown-fallback"),
+        ],
+    )
+    def test_error_response_contains_expected_text(self, error_type, expected_substring):
+        """Test that error responses contain expected text."""
+        msg = format_error_response(error_type)
+        assert expected_substring.lower() in msg.lower()
 
-    def test_rate_limit_error(self):
-        """Test rate limit error message."""
-        msg = format_error_response("rate_limit")
-        assert "wait" in msg.lower()
-
-    def test_config_error(self):
-        """Test config error message."""
-        msg = format_error_response("config")
-        assert "configured" in msg.lower()
-
-    def test_too_long_error(self):
-        """Test too long question error."""
-        msg = format_error_response("too_long")
-        assert "20,000" in msg
-
-    def test_exhausted_error(self):
-        """Test exhausted daily limit error."""
+    def test_exhausted_error_shows_limit(self):
+        """Test exhausted error shows the daily limit number."""
         msg = format_error_response("exhausted")
         assert "60" in msg
-        assert "tomorrow" in msg.lower()
+
+    def test_no_question_mentions_question(self):
+        """Test no question error mentions 'question'."""
+        msg = format_error_response("no_question")
+        assert "question" in msg.lower()
 
     def test_api_error_with_details(self):
         """Test API error includes debug details."""
@@ -174,11 +173,6 @@ class TestFormatErrorResponse:
         long_detail = "A" * 200
         msg = format_error_response("api", long_detail)
         assert len(msg) < 250
-
-    def test_unknown_error_type(self):
-        """Test fallback for unknown error types."""
-        msg = format_error_response("unknown_type")
-        assert "wrong" in msg.lower()
 
 
 class TestIsImageAttachment:
@@ -242,76 +236,45 @@ class TestBuildSystemPromptDateTime:
 class TestBuildSystemPromptWithMetadata:
     """Tests for system prompt with QueryMetadata."""
 
-    def test_technical_query_type_adds_instructions(self):
-        """Test that technical query type adds specific instructions."""
-        metadata = make_metadata(query_type="technical")
+    @pytest.mark.parametrize(
+        "query_type,expected_keywords",
+        [
+            pytest.param("technical", ["technical", "code"], id="technical-query"),
+            pytest.param("creative", ["creative", "imaginative"], id="creative-query"),
+            pytest.param("factual", ["factual", "accurate"], id="factual-query"),
+        ],
+    )
+    def test_query_type_adds_instructions(self, query_type, expected_keywords):
+        """Test that query types add specific instructions."""
+        metadata = make_metadata(query_type=query_type)
         prompt = build_system_prompt(
             guild_name="Test",
             channel_name="general",
             user_name="User",
             query_metadata=metadata,
         )
-        # Should contain technical-specific guidance
-        assert "technical" in prompt.lower() or "code" in prompt.lower()
+        prompt_lower = prompt.lower()
+        assert any(kw in prompt_lower for kw in expected_keywords)
 
-    def test_creative_query_type_adds_instructions(self):
-        """Test that creative query type adds specific instructions."""
-        metadata = make_metadata(query_type="creative")
+    @pytest.mark.parametrize(
+        "style,expected_keywords",
+        [
+            pytest.param("brief", ["brief", "concise", "direct"], id="brief-style"),
+            pytest.param("detailed", ["detailed", "thorough"], id="detailed-style"),
+            pytest.param("sarcastic", ["sarcastic", "witty", "humor"], id="sarcastic-style"),
+        ],
+    )
+    def test_response_style_adds_instructions(self, style, expected_keywords):
+        """Test that response styles add specific instructions."""
+        metadata = make_metadata(suggested_response_style=style)
         prompt = build_system_prompt(
             guild_name="Test",
             channel_name="general",
             user_name="User",
             query_metadata=metadata,
         )
-        assert "creative" in prompt.lower() or "imaginative" in prompt.lower()
-
-    def test_factual_query_type_adds_instructions(self):
-        """Test that factual query type adds specific instructions."""
-        metadata = make_metadata(query_type="factual")
-        prompt = build_system_prompt(
-            guild_name="Test",
-            channel_name="general",
-            user_name="User",
-            query_metadata=metadata,
-        )
-        assert "factual" in prompt.lower() or "accurate" in prompt.lower()
-
-    def test_brief_style_adds_instructions(self):
-        """Test that brief response style adds instructions."""
-        metadata = make_metadata(suggested_response_style="brief")
-        prompt = build_system_prompt(
-            guild_name="Test",
-            channel_name="general",
-            user_name="User",
-            query_metadata=metadata,
-        )
-        assert (
-            "brief" in prompt.lower() or "concise" in prompt.lower() or "direct" in prompt.lower()
-        )
-
-    def test_detailed_style_adds_instructions(self):
-        """Test that detailed response style adds instructions."""
-        metadata = make_metadata(suggested_response_style="detailed")
-        prompt = build_system_prompt(
-            guild_name="Test",
-            channel_name="general",
-            user_name="User",
-            query_metadata=metadata,
-        )
-        assert "detailed" in prompt.lower() or "thorough" in prompt.lower()
-
-    def test_sarcastic_style_adds_instructions(self):
-        """Test that sarcastic response style adds instructions."""
-        metadata = make_metadata(suggested_response_style="sarcastic")
-        prompt = build_system_prompt(
-            guild_name="Test",
-            channel_name="general",
-            user_name="User",
-            query_metadata=metadata,
-        )
-        assert (
-            "sarcastic" in prompt.lower() or "witty" in prompt.lower() or "humor" in prompt.lower()
-        )
+        prompt_lower = prompt.lower()
+        assert any(kw in prompt_lower for kw in expected_keywords)
 
     def test_key_topics_included(self):
         """Test that key topics are included in prompt."""
@@ -389,3 +352,458 @@ class TestBuildSystemPromptWithoutMetadata:
         )
         today = datetime.now(UTC)
         assert str(today.year) in prompt
+
+
+class TestFetchContextMessages:
+    """Tests for fetch_context_messages function."""
+
+    @pytest.mark.asyncio
+    async def test_fetches_messages_excluding_command(self):
+        """Test that command message is excluded from results."""
+        from unittest.mock import MagicMock
+
+        from strofkabot.utils.ask_helpers import fetch_context_messages
+
+        # Create mock messages
+        msg1 = MagicMock()
+        msg1.id = 100
+        msg2 = MagicMock()
+        msg2.id = 200  # Command message to exclude
+        msg3 = MagicMock()
+        msg3.id = 300
+
+        # Create mock channel with async iterator
+        mock_channel = MagicMock()
+
+        async def mock_history(limit):
+            for msg in [msg3, msg2, msg1]:  # Discord returns newest first
+                yield msg
+
+        mock_channel.history = mock_history
+
+        result = await fetch_context_messages(mock_channel, exclude_message_id=200, limit=10)
+
+        # Should exclude message 200 and return in oldest-first order
+        assert len(result) == 2
+        assert result[0].id == 100
+        assert result[1].id == 300
+
+    @pytest.mark.asyncio
+    async def test_respects_limit(self):
+        """Test that limit is respected."""
+        from unittest.mock import MagicMock
+
+        from strofkabot.utils.ask_helpers import fetch_context_messages
+
+        messages = [MagicMock(id=i) for i in range(20)]
+
+        mock_channel = MagicMock()
+
+        async def mock_history(limit):
+            for msg in messages[:limit]:
+                yield msg
+
+        mock_channel.history = mock_history
+
+        result = await fetch_context_messages(mock_channel, exclude_message_id=999, limit=5)
+
+        assert len(result) == 5
+
+
+class TestPrepareContext:
+    """Tests for prepare_context function."""
+
+    @pytest.mark.asyncio
+    async def test_prepares_basic_context(self):
+        """Test that basic context is prepared correctly."""
+        from unittest.mock import MagicMock
+
+        from strofkabot.utils.ask_helpers import prepare_context
+
+        msg = MagicMock()
+        msg.author = MagicMock()
+        msg.author.id = 12345
+        msg.author.display_name = "TestUser"
+        msg.content = "Hello world"
+        msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+        msg.reference = None
+        msg.attachments = []
+
+        result = await prepare_context([msg])
+
+        assert len(result) == 1
+        assert result[0]["author"] == "TestUser"
+        assert result[0]["content"] == "Hello world"
+        assert result[0]["timestamp"] == "10:30"
+        assert result[0]["image_count"] == 0
+
+    @pytest.mark.asyncio
+    async def test_handles_empty_content(self):
+        """Test that empty content is replaced with placeholder."""
+        from unittest.mock import MagicMock
+
+        from strofkabot.utils.ask_helpers import prepare_context
+
+        msg = MagicMock()
+        msg.author = MagicMock()
+        msg.author.id = 12345
+        msg.author.display_name = "TestUser"
+        msg.content = ""
+        msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+        msg.reference = None
+        msg.attachments = []
+
+        result = await prepare_context([msg])
+
+        assert result[0]["content"] == "[no text]"
+
+    @pytest.mark.asyncio
+    async def test_counts_image_attachments(self):
+        """Test that image attachments are counted."""
+        from unittest.mock import MagicMock
+
+        from strofkabot.utils.ask_helpers import prepare_context
+
+        attachment1 = MagicMock()
+        attachment1.filename = "photo.jpg"
+        attachment2 = MagicMock()
+        attachment2.filename = "image.png"
+        attachment3 = MagicMock()
+        attachment3.filename = "document.pdf"
+
+        msg = MagicMock()
+        msg.author = MagicMock()
+        msg.author.id = 12345
+        msg.author.display_name = "TestUser"
+        msg.content = "Check these images"
+        msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+        msg.reference = None
+        msg.attachments = [attachment1, attachment2, attachment3]
+
+        result = await prepare_context([msg])
+
+        # Should count only image attachments (jpg, png), not pdf
+        assert result[0]["image_count"] == 2
+
+    @pytest.mark.asyncio
+    async def test_handles_reply_info(self):
+        """Test that reply information is included."""
+        from unittest.mock import MagicMock
+
+        from strofkabot.utils.ask_helpers import prepare_context
+
+        replied_msg = MagicMock()
+        replied_msg.id = 100
+        replied_msg.author = MagicMock()
+        replied_msg.author.id = 54321
+        replied_msg.author.display_name = "OriginalUser"
+        replied_msg.content = "Original message content here"
+
+        msg = MagicMock()
+        msg.author = MagicMock()
+        msg.author.id = 12345
+        msg.author.display_name = "Replier"
+        msg.content = "My reply"
+        msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+        msg.reference = MagicMock()
+        msg.reference.resolved = replied_msg
+        msg.attachments = []
+
+        result = await prepare_context([msg])
+
+        assert result[0]["reply_to_author"] == "OriginalUser"
+        assert result[0]["reply_to_content"][:20] == "Original message con"
+
+    @pytest.mark.asyncio
+    async def test_uses_nicknames_when_provided(self):
+        """Test that nicknames override display names when provided."""
+        from unittest.mock import MagicMock
+
+        from strofkabot.utils.ask_helpers import prepare_context
+
+        msg = MagicMock()
+        msg.author = MagicMock()
+        msg.author.id = 12345
+        msg.author.display_name = "RealName"
+        msg.content = "Hello"
+        msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
+        msg.reference = None
+        msg.attachments = []
+
+        nicknames = {12345: ["Nickname", "AltNickname"]}
+
+        result = await prepare_context([msg], nicknames=nicknames)
+
+        assert result[0]["author"] == "Nickname"
+
+
+class TestExtractImagesFromMessages:
+    """Tests for extract_images_from_messages function."""
+
+    @pytest.mark.asyncio
+    async def test_extracts_images(self):
+        """Test that images are extracted from messages."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from strofkabot.utils.ask_helpers import extract_images_from_messages
+
+        attachment = MagicMock()
+        attachment.filename = "photo.jpg"
+        attachment.url = "http://example.com/photo.jpg"
+
+        msg = MagicMock()
+        msg.attachments = [attachment]
+
+        with patch(
+            "strofkabot.utils.ask_helpers.download_and_encode_image",
+            new_callable=AsyncMock,
+        ) as mock_download:
+            mock_download.return_value = {"data": "base64data", "mime_type": "image/jpeg"}
+
+            result = await extract_images_from_messages([msg])
+
+            assert len(result) == 1
+            assert result[0]["data"] == "base64data"
+
+    @pytest.mark.asyncio
+    async def test_skips_non_image_attachments(self):
+        """Test that non-image attachments are skipped."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from strofkabot.utils.ask_helpers import extract_images_from_messages
+
+        attachment = MagicMock()
+        attachment.filename = "document.pdf"
+        attachment.url = "http://example.com/doc.pdf"
+
+        msg = MagicMock()
+        msg.attachments = [attachment]
+
+        with patch(
+            "strofkabot.utils.ask_helpers.download_and_encode_image",
+            new_callable=AsyncMock,
+        ) as mock_download:
+            result = await extract_images_from_messages([msg])
+
+            assert len(result) == 0
+            mock_download.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_limits_to_3_images_per_message(self):
+        """Test that only 3 images per message are processed."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from strofkabot.utils.ask_helpers import extract_images_from_messages
+
+        attachments = [
+            MagicMock(filename=f"image{i}.jpg", url=f"http://example.com/{i}.jpg") for i in range(5)
+        ]
+
+        msg = MagicMock()
+        msg.attachments = attachments
+
+        with patch(
+            "strofkabot.utils.ask_helpers.download_and_encode_image",
+            new_callable=AsyncMock,
+        ) as mock_download:
+            mock_download.return_value = {"data": "base64", "mime_type": "image/jpeg"}
+
+            result = await extract_images_from_messages([msg])
+
+            assert len(result) == 3
+            assert mock_download.call_count == 3
+
+    @pytest.mark.asyncio
+    async def test_skips_failed_downloads(self):
+        """Test that failed downloads are skipped."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from strofkabot.utils.ask_helpers import extract_images_from_messages
+
+        attachments = [
+            MagicMock(filename="good.jpg", url="http://example.com/good.jpg"),
+            MagicMock(filename="bad.jpg", url="http://example.com/bad.jpg"),
+        ]
+
+        msg = MagicMock()
+        msg.attachments = attachments
+
+        with patch(
+            "strofkabot.utils.ask_helpers.download_and_encode_image",
+            new_callable=AsyncMock,
+        ) as mock_download:
+            # First succeeds, second fails
+            mock_download.side_effect = [
+                {"data": "base64", "mime_type": "image/jpeg"},
+                None,
+            ]
+
+            result = await extract_images_from_messages([msg])
+
+            assert len(result) == 1
+
+
+class TestDownloadAndEncodeImage:
+    """Tests for download_and_encode_image function."""
+
+    @pytest.mark.asyncio
+    async def test_successful_download_and_encode(self):
+        """Test successful image download and encoding."""
+        import io
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from PIL import Image
+
+        from strofkabot.utils.ask_helpers import download_and_encode_image
+
+        # Create a small test image
+        img = Image.new("RGB", (100, 100), color="red")
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG")
+        image_bytes = buffer.getvalue()
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.read = AsyncMock(return_value=image_bytes)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response))
+        )
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock()
+
+        with patch("strofkabot.utils.ask_helpers.aiohttp.ClientSession", return_value=mock_session):
+            result = await download_and_encode_image("http://example.com/image.jpg", "image.jpg")
+
+        assert result is not None
+        assert "data" in result
+        assert result["mime_type"] == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_http_error(self):
+        """Test that HTTP errors return None."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from strofkabot.utils.ask_helpers import download_and_encode_image
+
+        mock_response = AsyncMock()
+        mock_response.status = 404
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response))
+        )
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock()
+
+        with patch("strofkabot.utils.ask_helpers.aiohttp.ClientSession", return_value=mock_session):
+            result = await download_and_encode_image("http://example.com/image.jpg", "image.jpg")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_oversized_image(self):
+        """Test that oversized images return None."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from strofkabot.utils.ask_helpers import download_and_encode_image
+
+        # Create image data larger than 8MB (2x the 4MB limit)
+        large_image_bytes = b"x" * (9 * 1024 * 1024)
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.read = AsyncMock(return_value=large_image_bytes)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response))
+        )
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock()
+
+        with patch("strofkabot.utils.ask_helpers.aiohttp.ClientSession", return_value=mock_session):
+            result = await download_and_encode_image("http://example.com/large.jpg", "large.jpg")
+
+        assert result is None
+
+    @pytest.mark.asyncio
+    async def test_resizes_large_dimension_images(self):
+        """Test that images with large dimensions are resized."""
+        import io
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from PIL import Image
+
+        from strofkabot.utils.ask_helpers import download_and_encode_image
+
+        # Create a large image (3000x3000)
+        img = Image.new("RGB", (3000, 3000), color="blue")
+        buffer = io.BytesIO()
+        img.save(buffer, format="JPEG", quality=50)
+        image_bytes = buffer.getvalue()
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.read = AsyncMock(return_value=image_bytes)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response))
+        )
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock()
+
+        with patch("strofkabot.utils.ask_helpers.aiohttp.ClientSession", return_value=mock_session):
+            result = await download_and_encode_image("http://example.com/large.jpg", "large.jpg")
+
+        assert result is not None
+        assert result["mime_type"] == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_converts_rgba_to_rgb(self):
+        """Test that RGBA images are converted to RGB."""
+        import io
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from PIL import Image
+
+        from strofkabot.utils.ask_helpers import download_and_encode_image
+
+        # Create RGBA image
+        img = Image.new("RGBA", (100, 100), color=(255, 0, 0, 128))
+        buffer = io.BytesIO()
+        img.save(buffer, format="PNG")
+        image_bytes = buffer.getvalue()
+
+        mock_response = AsyncMock()
+        mock_response.status = 200
+        mock_response.read = AsyncMock(return_value=image_bytes)
+
+        mock_session = MagicMock()
+        mock_session.get = MagicMock(
+            return_value=AsyncMock(__aenter__=AsyncMock(return_value=mock_response))
+        )
+        mock_session.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session.__aexit__ = AsyncMock()
+
+        with patch("strofkabot.utils.ask_helpers.aiohttp.ClientSession", return_value=mock_session):
+            result = await download_and_encode_image("http://example.com/image.png", "image.png")
+
+        assert result is not None
+        assert result["mime_type"] == "image/jpeg"
+
+    @pytest.mark.asyncio
+    async def test_returns_none_on_exception(self):
+        """Test that exceptions return None."""
+        from unittest.mock import patch
+
+        from strofkabot.utils.ask_helpers import download_and_encode_image
+
+        with patch("strofkabot.utils.ask_helpers.aiohttp.ClientSession") as mock_session_class:
+            mock_session_class.side_effect = Exception("Connection error")
+
+            result = await download_and_encode_image("http://example.com/image.jpg", "image.jpg")
+
+        assert result is None

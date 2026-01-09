@@ -45,7 +45,10 @@ systemctl --user stop strofkabot && podman build -t strofkabot . && systemctl --
 
 ## Environment Setup
 
-The bot requires `LLUMI_BOT_TOKEN` in a `.env` file at the project root.
+The bot requires the following in a `.env` file at the project root:
+- `LLUMI_BOT_TOKEN` - Discord bot token (required)
+- `GOOGLE_API_KEY` - Google Gemini API key (optional, for AI fallback)
+- `OPENROUTER_API_KEY` - OpenRouter API key (optional, for AI features)
 
 ## Architecture
 
@@ -55,12 +58,31 @@ This is a Discord bot for community analytics on the "Strofka" server, tracking 
 
 ```
 strofkabot/
-├── llumi.py              # Entry point, LlumiBot cog with Discord commands
-├── config.py             # Constants (GUILD_ID, paths, thresholds)
-├── discord_db.py         # Database - single DAL for all SQLite operations
+├── llumi.py              # Entry point - orchestrates cogs and background tasks
+├── config.py             # Constants (GUILD_ID, paths, thresholds, AI config)
+├── discord_db.py         # Legacy database import (uses db/ module)
 ├── user_stats.py         # UserStats - business logic for user statistics
 ├── message_filter.py     # MessageFilter - validates message quality
 ├── artan_quotes.py       # ArtanQuotes - quote data for !artan command
+├── gemini_client.py      # Google Gemini API client (AI fallback)
+├── openrouter_client.py  # OpenRouter API client (primary AI)
+├── image_processor.py    # Image compression and format handling
+├── url_extractor.py      # URL detection in messages
+├── message_history_db.py # Message history database for AI context
+├── cogs/                 # Discord command modules
+│   ├── base.py           # BaseCog - shared dependencies for all cogs
+│   ├── ai.py             # AICog - !ask, !predict commands
+│   ├── economics.py      # EconomicsCog - !inflation, !trade, !gdp, !hdi
+│   ├── entertainment.py  # EntertainmentCog - !llumi, !artan, !on-this-day, !ditaezeze
+│   ├── network.py        # NetworkCog - !connections, !riekt-graph, !cluster, !echo-chamber
+│   └── user_stats.py     # UserStatsCog - !rpm, !most-liked, !activity
+├── db/                   # Database operation modules (mixin-based)
+│   ├── base.py           # BaseDatabase - connection management, schema
+│   ├── messages.py       # MessagesMixin - message table operations
+│   ├── attachments.py    # AttachmentsMixin - attachment storage
+│   ├── stats.py          # StatsMixin - user statistics queries
+│   ├── predictions.py    # PredictionsMixin - prediction tracking
+│   └── on_this_day.py    # OnThisDayMixin - historical lookups
 ├── tasks/
 │   ├── __init__.py
 │   └── update_tasks.py   # BackgroundTaskManager - DB/username update tasks
@@ -69,32 +91,65 @@ strofkabot/
     ├── visualization.py  # Matplotlib/seaborn plotting functions
     ├── data_processing.py# Data fetching and calculations
     ├── discord_helpers.py# Discord-specific utilities (leaderboards, etc.)
-    └── date_utils.py     # Date arithmetic helpers
+    ├── date_utils.py     # Date arithmetic helpers
+    ├── ask_helpers.py    # AI context preparation, message formatting
+    ├── nickname_loader.py# Custom nickname loading from YAML
+    └── reaction_graph.py # Graph operations for network analysis
 ```
 
 ### Core Components
 
-**Entry Point**: `strofkabot/llumi.py` - Contains `LlumiBot` cog with Discord commands. Delegates background tasks to `BackgroundTaskManager`.
+**Entry Point**: `strofkabot/llumi.py` - Orchestrates cog loading and manages background tasks. Commands are in `cogs/` modules.
+
+**Cogs**: `strofkabot/cogs/` - Domain-based command modules:
+- `base.py` - BaseCog with shared database, user_stats, and logger
+- `ai.py` - AICog: AI-powered commands (!ask, !predict)
+- `economics.py` - EconomicsCog: Server economy analytics
+- `entertainment.py` - EntertainmentCog: Fun and historical content
+- `network.py` - NetworkCog: Social network analysis
+- `user_stats.py` - UserStatsCog: User engagement metrics
 
 **Background Tasks**: `strofkabot/tasks/update_tasks.py` - `BackgroundTaskManager` handles:
 - `update_db()` - Scans Discord history every 24 hours
 - `update_usernames()` - Updates username cache every 24 hours
 
 **Database Layer** (async SQLite via aiosqlite):
-- `strofkabot/discord_db.py` - `Database` is the single DAL for all SQL operations:
-  - Stores high-quality messages (≥4 reactions, passes filter)
-  - Manages user stats tables (`user_stats_monthly`, `user_reactions_monthly`, `user_mapping`)
-  - All raw SQL queries live here
-- `strofkabot/user_stats.py` - `UserStats` provides business logic layer:
-  - Takes a `Database` instance, no direct SQL
-  - Formats query results into dicts, handles logging
-  - Methods: `get_gdp_data()`, `get_hdi_data()`, `get_reaction_trade_data()`, `get_reaction_network_for_month()`
+
+The bot uses two separate databases:
+
+1. **Main Database** (`db.sqlite3`) - Mixin-based architecture in `strofkabot/db/`:
+   - `Database` class composes specialized mixins for separation of concerns
+   - `BaseDatabase` handles connection management and schema creation
+   - `MessagesMixin` - high-quality message operations
+   - `AttachmentsMixin` - image/file attachment storage
+   - `StatsMixin` - user statistics queries
+   - `PredictionsMixin` - prediction storage and retrieval
+   - `OnThisDayMixin` - historical message lookup
+
+2. **Message History Database** (`message_history.db`) via `message_history_db.py`:
+   - Stores ALL messages (unfiltered) for AI context
+   - Used by !ask command for conversation awareness
+   - Supports incremental scraping with progress tracking
+   - Provides hourly activity queries with timezone support
+
+**Business Logic**: `strofkabot/user_stats.py` - `UserStats` provides high-level methods:
+- Takes a `Database` instance, no direct SQL
+- Methods: `get_gdp_data()`, `get_hdi_data()`, `get_reaction_trade_data()`, `get_reaction_network_for_month()`
+
+**AI Integration**:
+- `openrouter_client.py` - Primary AI provider using free models (Gemini 3 Flash)
+- `gemini_client.py` - Fallback Google Gemini API client
+- `image_processor.py` - Image compression for AI vision
+- Automatic search/thinking detection with classifier model
 
 **Utilities**: `strofkabot/utils/` package with specialized modules:
 - `visualization.py` - All plot generation (inflation, GDP, HDI, reaction matrix, clusters, activity heatmap)
 - `data_processing.py` - Data fetching via DAL, inflation calculations, clustering, hourly activity
 - `discord_helpers.py` - Leaderboard display, personal stats, most-liked rankings, `get_reply_info()`
 - `date_utils.py` - Month arithmetic with year boundary handling
+- `ask_helpers.py` - AI context preparation, message formatting
+- `nickname_loader.py` - Custom nickname loading from YAML
+- `reaction_graph.py` - Graph operations for network analysis
 
 ### Data Flow
 
@@ -105,20 +160,43 @@ strofkabot/
 
 ### Key Database Tables
 
+**Main Database** (`db.sqlite3`):
+- `messages` - High-quality messages (≥4 reactions) for !llumi command
 - `user_stats_monthly` - (author_id, year, month) → message count, reaction count
-- `user_reactions_monthly` - (giver_id, receiver_id, year, month) → reaction count (who reacts to whom)
-- `messages` - High-quality messages for the `!llumi` command
+- `user_reactions_monthly` - (giver_id, receiver_id, year, month) → reaction count
+- `user_replies_monthly` - (replier_id, replied_to_id, year, month) → reply count
 - `user_mapping` - author_id → display name cache
+- `attachments` - Stored images/files from high-quality messages
+- `predictions` - User predictions with target dates and retry tracking
+
+**Message History Database** (`message_history.db`):
+- `messages` - All Discord messages with full context (content, replies, reactions)
+- `scrape_progress` - Incremental scraping state per channel
 
 ### Discord Commands
 
-Commands are prefixed with `!`: `llumi`, `rpm`, `trade`, `inflation`, `gdp`, `hdi`, `most-liked`, `artan`, `unsubscribe`, `activity`, `predict`, `connections`, `cluster`, `riekt-graph`
+Commands are prefixed with `!`:
+
+**Entertainment**: `llumi`, `artan`, `unsubscribe`, `ditaezeze`, `on-this-day` (alias: `otd`)
+**User Stats**: `rpm`, `most-liked`, `activity`
+**Economics**: `inflation`, `trade`, `gdp`, `hdi`
+**Network**: `connections`, `riekt-graph`, `cluster`, `echo-chamber` (aliases: `ec`, `bubble`)
+**AI**: `ask`, `predict`
 
 ### Configuration
 
 All constants are centralized in `strofkabot/config.py`:
 - `GUILD_ID` - Discord server ID
+- `PREDICTIONS_CHANNEL_ID` - Channel for prediction posts
 - `UPDATE_INTERVAL_SECONDS` - Background task interval (24 hours)
-- `DATABASE_FILE_LOCATION` - Path to SQLite database
+- `DATABASE_FILE_LOCATION` - Path to main SQLite database
+- `MESSAGE_HISTORY_DATABASE_FILE` - Path to message history database
 - `ARTAN_QUOTES_PATH` - Path to quotes YAML file
+- `NICKNAMES_FILE` - Path to custom nicknames YAML
+- `ATTACHMENTS_DIR` - Directory for stored attachments
 - `REACT_COUNT_THRESHOLD` - Minimum reactions for quality messages (4)
+- `IMAGE_MAX_SIZE_BYTES` - Image size limit (1 MB)
+- `GEMINI_MODELS` - List of Gemini model IDs for fallback
+- `GEMINI_RPD_LIMIT` - Requests per day limit per model
+- `OPENROUTER_INFERENCE_MODEL` - Primary AI model
+- `OPENROUTER_VISION_MODEL` - Vision model for images

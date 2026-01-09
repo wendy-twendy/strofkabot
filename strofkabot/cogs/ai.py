@@ -39,8 +39,14 @@ class AICog(commands.Cog):
         self.logger = logger
         self._gemini_client: GeminiClient | None = None
         self._openrouter_client: OpenRouterClient | None = None
-        self._ask_lock = asyncio.Lock()
+        self._channel_locks: dict[int, asyncio.Lock] = {}
         self._nicknames = load_nicknames(NICKNAMES_FILE)
+
+    def _get_channel_lock(self, channel_id: int) -> asyncio.Lock:
+        """Get or create a lock for a specific channel."""
+        if channel_id not in self._channel_locks:
+            self._channel_locks[channel_id] = asyncio.Lock()
+        return self._channel_locks[channel_id]
 
     @property
     def openrouter_client(self) -> OpenRouterClient | None:
@@ -66,6 +72,124 @@ class AICog(commands.Cog):
                 return None
         return self._gemini_client
 
+    async def _handle_ask(
+        self,
+        message: discord.Message,
+        question: str,
+    ) -> None:
+        """Core logic for answering questions with AI.
+
+        Called by both !ask command and @mention handler.
+
+        Args:
+            message: The Discord message containing the question.
+            question: The question text to answer.
+        """
+        channel = message.channel
+        author = message.author
+        guild = message.guild
+
+        async with channel.typing():
+            try:
+                # Fetch ALL context messages (for conversation history)
+                messages = await fetch_context_messages(
+                    channel,
+                    exclude_message_id=message.id,
+                    limit=GEMINI_MAX_CONTEXT_MESSAGES,
+                )
+
+                # Prepare text context from all messages
+                context_dicts = await prepare_context(messages, self._nicknames)
+
+                # Extract images from: command message + last 5 context messages
+                recent_messages = [message]
+                if messages:
+                    recent_messages.extend(messages[-5:])
+                images = await extract_images_from_messages(recent_messages)
+
+                # Extract URLs from: question + last 2 context messages only
+                url_sources = [{"content": question}]
+                if context_dicts:
+                    url_sources.extend(context_dicts[-2:])
+                url_contents = await extract_urls_from_messages(url_sources)
+                url_context = format_url_context(url_contents)
+
+                # Get query metadata FIRST for dynamic system prompt
+                query_metadata = None
+                if self.openrouter_client is not None and not images:
+                    query_metadata = await self.openrouter_client.classify_query(
+                        question, context_dicts
+                    )
+
+                system_prompt = build_system_prompt(
+                    guild_name=guild.name if guild else "Direct Message",
+                    channel_name=channel.name if hasattr(channel, "name") else "DM",
+                    user_name=get_display_name(author.id, author.display_name, self._nicknames),
+                    query_metadata=query_metadata,
+                )
+
+                response = None
+                used_fallback = False
+
+                # Try OpenRouter first (including for images with vision model)
+                if self.openrouter_client is not None:
+                    response = await self.openrouter_client.ask_with_context(
+                        question=question,
+                        system_prompt=system_prompt,
+                        context_messages=context_dicts,
+                        images=images if images else None,
+                        query_metadata=query_metadata,
+                        url_context=url_context if url_context else None,
+                    )
+
+                    if response.success:
+                        self.logger.info(
+                            f"OpenRouter success: model={response.model_used}, "
+                            f"search={response.search_used}, thinking={response.thinking_used}"
+                        )
+                    else:
+                        self.logger.warning(
+                            f"OpenRouter failed: {response.error_message}, falling back to Gemini"
+                        )
+                        response = None  # Try Gemini fallback
+
+                # Fall back to Gemini if OpenRouter failed
+                if response is None and self.gemini_client is not None:
+                    used_fallback = True
+                    response = await self.gemini_client.ask_with_context(
+                        question=question,
+                        system_prompt=system_prompt,
+                        context_messages=context_dicts,
+                        images=images if images else None,
+                    )
+
+                # No response from either client
+                if response is None:
+                    await channel.send(format_error_response("config"))
+                    return
+
+                if not response.success:
+                    provider = "Gemini" if used_fallback else "OpenRouter"
+                    self.logger.error(f"{provider} error: {response.error_message}")
+                    if "rate" in (response.error_message or "").lower():
+                        await channel.send(format_error_response("rate_limit"))
+                    else:
+                        await channel.send(format_error_response("api", response.error_message))
+                    return
+
+                chunks = split_response(response.text)
+                for chunk in chunks:
+                    await channel.send(chunk)
+
+                self.logger.info(
+                    f"Ask completed for {author} using model {response.model_used}"
+                    + (" (fallback)" if used_fallback else "")
+                )
+
+            except Exception:
+                self.logger.exception("Unexpected error in ask handler")
+                await channel.send(format_error_response("api"))
+
     @commands.command(
         name="ask",
         help="Ask a question with AI assistance. Uses recent chat context and web search.",
@@ -81,12 +205,15 @@ class AICog(commands.Cog):
         Uses OpenRouter as primary (free models), falls back to Gemini for images
         or if OpenRouter fails.
         """
-        # Check if already processing a request
-        if self._ask_lock.locked():
+        # Get per-channel lock
+        channel_lock = self._get_channel_lock(ctx.channel.id)
+
+        # Check if already processing a request in this channel
+        if channel_lock.locked():
             await ctx.send(f"{ctx.author.mention} jam duke shkruar o kar, prit radhen")
             return
 
-        async with self._ask_lock:
+        async with channel_lock:
             if not question.strip():
                 await ctx.send(format_error_response("no_question"))
                 return
@@ -101,109 +228,51 @@ class AICog(commands.Cog):
                 return
 
             self.logger.info(f"Ask command from {ctx.author}: {question[:50]}...")
+            await self._handle_ask(ctx.message, question)
 
-            async with ctx.typing():
-                try:
-                    # Fetch ALL context messages (for conversation history)
-                    messages = await fetch_context_messages(
-                        ctx.channel,
-                        exclude_message_id=ctx.message.id,
-                        limit=GEMINI_MAX_CONTEXT_MESSAGES,
-                    )
+    @commands.Cog.listener()
+    async def on_message(self, message: discord.Message) -> None:
+        """Handle bot mentions as equivalent to !ask command."""
+        # Ignore bot messages
+        if message.author.bot:
+            return
 
-                    # Prepare text context from all messages
-                    context_dicts = await prepare_context(messages, self._nicknames)
+        # Check if bot is mentioned
+        if self.bot.user not in message.mentions:
+            return
 
-                    # Extract images from: !ask message + last 2 context messages only
-                    recent_messages = [ctx.message]
-                    if messages:
-                        recent_messages.extend(messages[-2:])
-                    images = await extract_images_from_messages(recent_messages)
+        # Get per-channel lock
+        channel_lock = self._get_channel_lock(message.channel.id)
 
-                    # Extract URLs from: question + last 2 context messages only
-                    url_sources = [{"content": question}]
-                    if context_dicts:
-                        url_sources.extend(context_dicts[-2:])
-                    url_contents = await extract_urls_from_messages(url_sources)
-                    url_context = format_url_context(url_contents)
+        # Check if already processing a request in this channel
+        if channel_lock.locked():
+            await message.channel.send(
+                f"{message.author.mention} jam duke shkruar o kar, prit radhen"
+            )
+            return
 
-                    # Get query metadata FIRST for dynamic system prompt
-                    query_metadata = None
-                    if self.openrouter_client is not None and not images:
-                        query_metadata = await self.openrouter_client.classify_query(
-                            question, context_dicts
-                        )
+        async with channel_lock:
+            # Extract question by removing the mention
+            question = message.content
+            question = question.replace(f"<@{self.bot.user.id}>", "")
+            question = question.replace(f"<@!{self.bot.user.id}>", "")
+            question = question.strip()
 
-                    system_prompt = build_system_prompt(
-                        guild_name=ctx.guild.name if ctx.guild else "Direct Message",
-                        channel_name=ctx.channel.name if hasattr(ctx.channel, "name") else "DM",
-                        user_name=get_display_name(
-                            ctx.author.id, ctx.author.display_name, self._nicknames
-                        ),
-                        query_metadata=query_metadata,
-                    )
+            if not question:
+                await message.channel.send(format_error_response("no_question"))
+                return
 
-                    response = None
-                    used_fallback = False
+            if len(question) > 20000:
+                await message.channel.send(format_error_response("too_long"))
+                return
 
-                    # Try OpenRouter first (including for images with vision model)
-                    if self.openrouter_client is not None:
-                        response = await self.openrouter_client.ask_with_context(
-                            question=question,
-                            system_prompt=system_prompt,
-                            context_messages=context_dicts,
-                            images=images if images else None,
-                            query_metadata=query_metadata,
-                            url_context=url_context if url_context else None,
-                        )
+            # Check if at least one client is available
+            if self.openrouter_client is None and self.gemini_client is None:
+                await message.channel.send(format_error_response("config"))
+                return
 
-                        if response.success:
-                            self.logger.info(
-                                f"OpenRouter success: model={response.model_used}, "
-                                f"search={response.search_used}, thinking={response.thinking_used}"
-                            )
-                        else:
-                            self.logger.warning(
-                                f"OpenRouter failed: {response.error_message}, falling back to Gemini"
-                            )
-                            response = None  # Try Gemini fallback
-
-                    # Fall back to Gemini if OpenRouter failed
-                    if response is None and self.gemini_client is not None:
-                        used_fallback = True
-                        response = await self.gemini_client.ask_with_context(
-                            question=question,
-                            system_prompt=system_prompt,
-                            context_messages=context_dicts,
-                            images=images if images else None,
-                        )
-
-                    # No response from either client
-                    if response is None:
-                        await ctx.send(format_error_response("config"))
-                        return
-
-                    if not response.success:
-                        provider = "Gemini" if used_fallback else "OpenRouter"
-                        self.logger.error(f"{provider} error: {response.error_message}")
-                        if "rate" in (response.error_message or "").lower():
-                            await ctx.send(format_error_response("rate_limit"))
-                        else:
-                            await ctx.send(format_error_response("api", response.error_message))
-                        return
-
-                    chunks = split_response(response.text)
-                    for chunk in chunks:
-                        await ctx.send(chunk)
-
-                    self.logger.info(
-                        f"Ask command completed for {ctx.author} using model {response.model_used}"
-                        + (" (fallback)" if used_fallback else "")
-                    )
-
-                except Exception:
-                    self.logger.exception("Unexpected error in ask command")
-                    await ctx.send(format_error_response("api"))
+            self.logger.info(f"Mention ask from {message.author}: {question[:50]}...")
+            await self._handle_ask(message, question)
 
     @commands.command(
         name="predict",

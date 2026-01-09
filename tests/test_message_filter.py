@@ -1,5 +1,7 @@
+"""Test file for message_filter module.
 
-""" Test file for message_filter module """
+Uses parametrization for data-driven testing of message validation rules.
+"""
 
 # pylint: disable=redefined-outer-name
 import pytest
@@ -9,137 +11,158 @@ from strofkabot.message_filter import MessageFilter
 
 @pytest.fixture
 def message_filter():
-    """
-    Fixture to create an instance of MessageFilter.
-    """
+    """Fixture to create an instance of MessageFilter."""
     return MessageFilter()
 
-def test_short_message(message_filter):
-    """
-    Test that a short message is considered invalid.
-    """
-    assert not message_filter.is_valid_message("Short")
 
-def test_valid_message(message_filter):
-    """
-    Test that a valid message is correctly identified.
-    """
-    assert message_filter.is_valid_message("This is a valid message")
-
-def test_message_with_http_link(message_filter):
-    """
-    Test that a message containing an HTTP link is considered invalid.
-    """
-    assert not message_filter.is_valid_message("Check out http://example.com")
-
-def test_message_with_https_link(message_filter):
-    """
-    Test that a message containing an HTTPS link is considered invalid.
-    """
-    assert not message_filter.is_valid_message(" https://www.reddit.com/r/science/comments/8cih30/a_new_study_suggests_that_romance_protects_gay/?utm_source=reddit-android, created at 2018-04-15T22:33:59.926000+00:00")
-
-def test_message_with_emoji(message_filter):
-    """
-    Test that a message containing a single emoji is considered invalid.
-    """
-    assert not message_filter.is_valid_message("<:GWqlabsBan:398950688555663360>")
-
-def test_message_with_multiple_emojis(message_filter):
-    """
-    Test that a message containing multiple emojis is considered invalid.
-    """
-    assert not message_filter.is_valid_message("<:GWqlabsBan:398950688555663360> <:GWqlabsBan:398950688555663360>")
-
-def test_message_with_tag(message_filter):
-    """
-    Test that a message containing a user tag is considered invalid.
-    """
-    assert not message_filter.is_valid_message("test <@!416623828920172544> tesdfsdfsdfst")
-
-def test_message_with_colon(message_filter):
-    """
-    Test that a message containing a colon, but not an emoji, is considered valid.
-    """
-    assert message_filter.is_valid_message("This message has a colon: but it's not an emoji")
-
-def test_message_with_at(message_filter):
-    """
-    Test that a message containing an @ symbol, but not a valid tag, is considered valid.
-    """
-    assert message_filter.is_valid_message("This message has an @ symbol but not a valid tag")
-
-def test_edge_case_message_length(message_filter):
-    """
-    Test the edge case for message length.
-    """
-    assert not message_filter.is_valid_message("12345678911111")  # 9 characters
-    assert message_filter.is_valid_message("1234567890111111")  # 10 characters
-
-def test_message_with_multiple_exclusions(message_filter):
-    """
-    Test that a message containing multiple exclusions (e.g., user tag, link, emoji) is considered invalid.
-    """
-    assert not message_filter.is_valid_message("@user1234 check http://example.com :smiley:")
+# ============================================================================
+# Parametrized Tests for is_valid_message
+# ============================================================================
 
 
-def test_empty_string(message_filter):
-    """
-    Test that an empty string is considered invalid.
-    """
-    assert not message_filter.is_valid_message("")
+class TestValidMessages:
+    """Tests for messages that should be considered valid."""
+
+    @pytest.mark.parametrize(
+        "message",
+        [
+            pytest.param("This is a valid message", id="basic-valid"),
+            pytest.param("This message has a colon: but it's not an emoji", id="colon-not-emoji"),
+            pytest.param("This message has an @ symbol but not a valid tag", id="at-not-tag"),
+            pytest.param("1234567890111111", id="exactly-16-chars"),
+            pytest.param("This has unicode: кириллица текст", id="cyrillic-unicode"),
+            pytest.param("Chinese characters: 这是一个测试消息", id="chinese-unicode"),
+        ],
+    )
+    def test_valid_messages(self, message_filter, message):
+        """Test that valid messages are correctly identified."""
+        assert message_filter.is_valid_message(message)
 
 
-def test_whitespace_only_message(message_filter):
-    """
-    Test that a whitespace-only message is considered invalid due to length.
-    """
-    assert not message_filter.is_valid_message("   ")
-    assert not message_filter.is_valid_message("\t\n\r")
+class TestInvalidMessages:
+    """Tests for messages that should be considered invalid."""
+
+    @pytest.mark.parametrize(
+        "message,reason",
+        [
+            # Too short
+            pytest.param("Short", "too-short", id="short-message"),
+            pytest.param("12345678911111", "too-short", id="14-chars"),
+            pytest.param("", "empty", id="empty-string"),
+            pytest.param("   ", "whitespace-only", id="spaces-only"),
+            pytest.param("\t\n\r", "whitespace-only", id="tabs-newlines"),
+            # Contains links
+            pytest.param("Check out http://example.com", "http-link", id="http-link"),
+            pytest.param(
+                " https://www.reddit.com/r/science/comments/8cih30/a_new_study?utm_source=reddit",
+                "https-link",
+                id="https-link-with-params",
+            ),
+            # Contains Discord custom emojis
+            pytest.param("<:GWqlabsBan:398950688555663360>", "single-emoji", id="single-emoji"),
+            pytest.param(
+                "<:GWqlabsBan:398950688555663360> <:GWqlabsBan:398950688555663360>",
+                "multiple-emojis",
+                id="multiple-emojis",
+            ),
+            # Contains user mentions
+            pytest.param(
+                "test <@!416623828920172544> tesdfsdfsdfst",
+                "user-mention",
+                id="user-mention-with-text",
+            ),
+            # Multiple exclusions
+            pytest.param(
+                "@user1234 check http://example.com :smiley:",
+                "multiple-exclusions",
+                id="multiple-exclusions",
+            ),
+        ],
+    )
+    def test_invalid_messages(self, message_filter, message, reason):
+        """Test that invalid messages are correctly rejected."""
+        assert not message_filter.is_valid_message(message), f"Should be invalid due to: {reason}"
 
 
-def test_unicode_characters(message_filter):
-    """
-    Test that unicode content without Discord emojis is valid.
-    """
-    assert message_filter.is_valid_message("This has unicode: кириллица текст")
-    assert message_filter.is_valid_message("Chinese characters: 这是一个测试消息")
+# ============================================================================
+# Parametrized Tests for is_link
+# ============================================================================
 
 
-def test_is_link_direct(message_filter):
-    """
-    Test the is_link method directly.
-    """
-    assert message_filter.is_link("http://example.com")
-    assert message_filter.is_link("https://example.com")
-    assert message_filter.is_link("check this http://test.com out")
-    assert not message_filter.is_link("no link here")
-    assert not message_filter.is_link("htt://not-a-link")
+class TestIsLink:
+    """Tests for the is_link method."""
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            pytest.param("http://example.com", True, id="http-simple"),
+            pytest.param("https://example.com", True, id="https-simple"),
+            pytest.param("check this http://test.com out", True, id="http-in-text"),
+            pytest.param("no link here", False, id="no-link"),
+            pytest.param("htt://not-a-link", False, id="malformed-protocol"),
+            pytest.param("ftp://files.example.com", False, id="ftp-not-matched"),
+        ],
+    )
+    def test_is_link(self, message_filter, text, expected):
+        """Test link detection for various inputs."""
+        assert message_filter.is_link(text) == expected
 
 
-def test_is_emoji_direct(message_filter):
-    """
-    Test the is_emoji method directly for Discord custom emojis.
-    """
-    assert message_filter.is_emoji("<:smile:123456789>")
-    assert message_filter.is_emoji("<:GWqlabsBan:398950688555663360>")
-    assert message_filter.is_emoji("some text <:emoji:123> more text")
-    assert not message_filter.is_emoji(":smile:")  # Standard emoji syntax, not Discord custom
-    assert not message_filter.is_emoji("no emoji here")
+# ============================================================================
+# Parametrized Tests for is_emoji
+# ============================================================================
 
 
-def test_is_tag_direct(message_filter):
-    """
-    Test the is_tag method directly for Discord mentions.
-    """
-    assert message_filter.is_tag("<@123456789>")
-    assert message_filter.is_tag("<@!416623828920172544>")
-    assert message_filter.is_tag("hey <@user> check this")
-    assert not message_filter.is_tag("@username")  # Not a Discord mention format
-    assert not message_filter.is_tag("no mention here")
+class TestIsEmoji:
+    """Tests for the is_emoji method (Discord custom emojis)."""
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            pytest.param("<:smile:123456789>", True, id="simple-emoji"),
+            pytest.param("<:GWqlabsBan:398950688555663360>", True, id="complex-emoji-name"),
+            pytest.param("some text <:emoji:123> more text", True, id="emoji-in-text"),
+            pytest.param(":smile:", False, id="standard-emoji-syntax"),
+            pytest.param("no emoji here", False, id="no-emoji"),
+            pytest.param("<:>", False, id="malformed-empty"),
+        ],
+    )
+    def test_is_emoji(self, message_filter, text, expected):
+        """Test Discord custom emoji detection."""
+        assert message_filter.is_emoji(text) == expected
 
 
-def test_channel_method_removed(message_filter):
-    """
-    Regression test: verify is_channel method was removed (had undefined channel_pattern).
-    """
-    assert not hasattr(message_filter, 'is_channel')
+# ============================================================================
+# Parametrized Tests for is_tag
+# ============================================================================
+
+
+class TestIsTag:
+    """Tests for the is_tag method (Discord mentions)."""
+
+    @pytest.mark.parametrize(
+        "text,expected",
+        [
+            pytest.param("<@123456789>", True, id="user-mention"),
+            pytest.param("<@!416623828920172544>", True, id="nickname-mention"),
+            pytest.param("hey <@user> check this", True, id="mention-in-text"),
+            pytest.param("@username", False, id="at-symbol-only"),
+            pytest.param("no mention here", False, id="no-mention"),
+        ],
+    )
+    def test_is_tag(self, message_filter, text, expected):
+        """Test Discord mention detection."""
+        assert message_filter.is_tag(text) == expected
+
+
+# ============================================================================
+# Regression Tests
+# ============================================================================
+
+
+class TestRegressions:
+    """Regression tests for previously fixed bugs."""
+
+    def test_channel_method_removed(self, message_filter):
+        """Regression test: verify is_channel method was removed (had undefined channel_pattern)."""
+        assert not hasattr(message_filter, "is_channel")

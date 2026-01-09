@@ -36,22 +36,31 @@ def mock_ctx():
     """Create a mock Discord context."""
     ctx = MagicMock()
     ctx.author = MagicMock()
+    ctx.author.id = 12345
     ctx.author.mention = "@TestUser"
     ctx.author.display_name = "TestUser"
     ctx.author.roles = []
     ctx.message = MagicMock()
     ctx.message.id = 12345
+    ctx.message.attachments = []
     ctx.guild = MagicMock()
     ctx.guild.name = "Test Guild"
     ctx.channel = MagicMock()
     ctx.channel.name = "test-channel"
+    ctx.channel.send = AsyncMock()
     ctx.send = AsyncMock()
 
-    # Mock typing() as async context manager
+    # Mock typing() as async context manager for both ctx and channel
     typing_mock = MagicMock()
     typing_mock.__aenter__ = AsyncMock()
     typing_mock.__aexit__ = AsyncMock()
     ctx.typing = MagicMock(return_value=typing_mock)
+    ctx.channel.typing = MagicMock(return_value=typing_mock)
+
+    # Link message back to channel and author for _handle_ask
+    ctx.message.channel = ctx.channel
+    ctx.message.author = ctx.author
+    ctx.message.guild = ctx.guild
 
     return ctx
 
@@ -114,10 +123,11 @@ class TestAskLockMechanism:
             # Wait for first request to acquire lock
             await asyncio.sleep(0.1)
 
-            # Second request with different context
+            # Second request with different context but SAME CHANNEL
             second_ctx = MagicMock()
             second_ctx.author = MagicMock()
             second_ctx.author.mention = "@SecondUser"
+            second_ctx.channel = first_ctx.channel  # Same channel = same lock
             second_ctx.send = AsyncMock()
 
             # Try second request while first is still processing
@@ -166,10 +176,11 @@ class TestAskLockMechanism:
             task1 = asyncio.create_task(call_ask(ai_cog, mock_ctx, "First"))
             await asyncio.sleep(0.1)
 
-            # Second request should get busy message with user mention
+            # Second request should get busy message with user mention (same channel)
             second_ctx = MagicMock()
             second_ctx.author = MagicMock()
             second_ctx.author.mention = "@BusyUser"
+            second_ctx.channel = mock_ctx.channel  # Same channel = same lock
             second_ctx.send = AsyncMock()
 
             await call_ask(ai_cog, second_ctx, "Second")
@@ -195,6 +206,7 @@ class TestAskLockMechanism:
 
         mock_client = MagicMock()
         mock_client.ask_with_context = AsyncMock(return_value=mock_response)
+        mock_client.classify_query = AsyncMock(return_value=None)
         ai_cog._openrouter_client = mock_client
 
         with (
@@ -216,8 +228,9 @@ class TestAskLockMechanism:
 
             await call_ask(ai_cog, mock_ctx, "What is 2+2?")
 
-            # Lock should be released
-            assert not ai_cog._ask_lock.locked()
+            # Per-channel lock should be released
+            channel_lock = ai_cog._get_channel_lock(mock_ctx.channel.id)
+            assert not channel_lock.locked()
 
     @pytest.mark.asyncio
     async def test_lock_released_on_error(self, ai_cog, mock_ctx):
@@ -230,6 +243,7 @@ class TestAskLockMechanism:
 
         mock_client = MagicMock()
         mock_client.ask_with_context = AsyncMock(return_value=mock_response)
+        mock_client.classify_query = AsyncMock(return_value=None)
         ai_cog._openrouter_client = mock_client
 
         with (
@@ -251,14 +265,16 @@ class TestAskLockMechanism:
 
             await call_ask(ai_cog, mock_ctx, "What is 2+2?")
 
-            # Lock should still be released
-            assert not ai_cog._ask_lock.locked()
+            # Per-channel lock should still be released
+            channel_lock = ai_cog._get_channel_lock(mock_ctx.channel.id)
+            assert not channel_lock.locked()
 
     @pytest.mark.asyncio
     async def test_lock_released_on_exception(self, ai_cog, mock_ctx):
         """Test that the lock is released even when an exception is raised."""
         mock_client = MagicMock()
         mock_client.ask_with_context = AsyncMock(side_effect=Exception("Test error"))
+        mock_client.classify_query = AsyncMock(return_value=None)
         ai_cog._openrouter_client = mock_client
 
         with (
@@ -280,8 +296,9 @@ class TestAskLockMechanism:
 
             await call_ask(ai_cog, mock_ctx, "What is 2+2?")
 
-            # Lock should still be released
-            assert not ai_cog._ask_lock.locked()
+            # Per-channel lock should still be released
+            channel_lock = ai_cog._get_channel_lock(mock_ctx.channel.id)
+            assert not channel_lock.locked()
 
     @pytest.mark.asyncio
     async def test_no_clients_returns_config_error(self, ai_cog, mock_ctx):
@@ -307,8 +324,9 @@ class TestAskLockMechanism:
         await call_ask(ai_cog, mock_ctx, "")
 
         mock_ctx.send.assert_called_once()
-        # Lock should not be held for validation errors
-        assert not ai_cog._ask_lock.locked()
+        # Per-channel lock should not be held for validation errors
+        channel_lock = ai_cog._get_channel_lock(mock_ctx.channel.id)
+        assert not channel_lock.locked()
 
     @pytest.mark.asyncio
     async def test_question_too_long_returns_error(self, ai_cog, mock_ctx):
@@ -320,4 +338,5 @@ class TestAskLockMechanism:
         await call_ask(ai_cog, mock_ctx, long_question)
 
         mock_ctx.send.assert_called_once()
-        assert not ai_cog._ask_lock.locked()
+        channel_lock = ai_cog._get_channel_lock(mock_ctx.channel.id)
+        assert not channel_lock.locked()
