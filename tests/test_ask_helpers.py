@@ -76,7 +76,7 @@ class TestBuildSystemPrompt:
         )
         assert "unfiltered" in prompt.lower()
         assert "discord" in prompt.lower()
-        assert "concise" in prompt.lower()
+        assert "500 chars" in prompt.lower()
 
 
 class TestSplitResponse:
