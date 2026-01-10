@@ -5,6 +5,8 @@
 import datetime
 from dataclasses import dataclass
 
+from strofkabot.db.base import parse_datetime_safe
+
 
 @dataclass
 class Attachment:
@@ -26,9 +28,9 @@ class AttachmentsMixin:
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
-        async with self.conn.executemany(
+        await self.conn.executemany(
             """
-            INSERT OR REPLACE INTO attachments
+            INSERT OR IGNORE INTO attachments
             (id, message_id, message_content, author_id, timestamp, reaction_count, original_filename, local_path)
             VALUES (:id, :message_id, :message_content, :author_id, :timestamp, :reaction_count, :original_filename, :local_path)
         """,
@@ -45,8 +47,7 @@ class AttachmentsMixin:
                 }
                 for att in attachments
             ],
-        ):
-            pass
+        )
         await self.conn.commit()
 
     async def get_random_attachment(self) -> Attachment | None:
@@ -59,12 +60,15 @@ class AttachmentsMixin:
         ) as cursor:
             row = await cursor.fetchone()
             if row:
+                timestamp = parse_datetime_safe(row[4])
+                if timestamp is None:
+                    return None
                 return Attachment(
                     id=row[0],
                     message_id=row[1],
                     message_content=row[2],
                     author_id=row[3],
-                    timestamp=datetime.datetime.fromisoformat(row[4]),
+                    timestamp=timestamp,
                     reaction_count=row[5],
                     original_filename=row[6],
                     local_path=row[7],

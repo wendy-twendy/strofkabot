@@ -8,7 +8,7 @@ import pytest
 
 from strofkabot.cogs.ai import AICog
 from strofkabot.discord_db import Database
-from strofkabot.openrouter_client import OpenRouterResponse
+from strofkabot.openrouter import OpenRouterResponse
 
 
 @pytest.fixture

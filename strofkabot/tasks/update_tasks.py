@@ -268,21 +268,49 @@ class BackgroundTaskManager:
             self.logger.exception(f"Error processing channel {channel.name} (ID: {channel.id})")
 
         # Always try to commit remaining batches (even after error)
-        try:
-            if history_messages_to_insert:
+        # Each batch is committed independently to maximize data saved
+        if history_messages_to_insert:
+            try:
                 await self.db.add_history_messages(history_messages_to_insert)
-            if messages_to_insert:
+            except Exception:
+                self.logger.exception(
+                    f"Error saving {len(history_messages_to_insert)} history messages for {channel.name}"
+                )
+        if messages_to_insert:
+            try:
                 await self.db.add_messages(messages_to_insert)
-            if attachments_to_insert:
+            except Exception:
+                self.logger.exception(
+                    f"Error saving {len(messages_to_insert)} quality messages for {channel.name}"
+                )
+        if attachments_to_insert:
+            try:
                 await self.db.add_attachments(attachments_to_insert)
-            if stats_to_update:
+            except Exception:
+                self.logger.exception(
+                    f"Error saving {len(attachments_to_insert)} attachments for {channel.name}"
+                )
+        if stats_to_update:
+            try:
                 await self.user_stats.batch_update_stats(stats_to_update)
-            if reactions_to_update:
+            except Exception:
+                self.logger.exception(
+                    f"Error saving {len(stats_to_update)} user stats for {channel.name}"
+                )
+        if reactions_to_update:
+            try:
                 await self.user_stats.batch_update_reaction_stats(reactions_to_update)
-            if replies_to_update:
+            except Exception:
+                self.logger.exception(
+                    f"Error saving {len(reactions_to_update)} reactions for {channel.name}"
+                )
+        if replies_to_update:
+            try:
                 await self.db.batch_upsert_reply_stats(replies_to_update)
-        except Exception:
-            self.logger.exception(f"Error committing remaining batches for channel {channel.name}")
+            except Exception:
+                self.logger.exception(
+                    f"Error saving {len(replies_to_update)} replies for {channel.name}"
+                )
 
         # Update timestamp to last processed message (allows resume on next run)
         if last_message_time > last_scanned:

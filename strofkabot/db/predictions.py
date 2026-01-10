@@ -3,7 +3,12 @@
 """Prediction operations mixin for the database."""
 
 import datetime
+import logging
 from dataclasses import dataclass
+
+from strofkabot.db.base import parse_date_safe, parse_datetime_safe
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -86,21 +91,28 @@ class PredictionsMixin:
         ) as cursor:
             rows = await cursor.fetchall()
 
-        return [
-            Prediction(
-                id=row[0],
-                author_id=row[1],
-                author_name=row[2],
-                channel_id=row[3],
-                target_date=datetime.date.fromisoformat(row[4]),
-                prediction_text=row[5],
-                created_at=datetime.datetime.fromisoformat(row[6]),
-                posted=bool(row[7]),
-                posted_at=(datetime.datetime.fromisoformat(row[8]) if row[8] else None),
-                retry_count=row[9],
+        predictions = []
+        for row in rows:
+            target_date = parse_date_safe(row[4])
+            created_at = parse_datetime_safe(row[6])
+            if target_date is None or created_at is None:
+                logger.warning(f"Skipping prediction {row[0]} due to invalid date/datetime")
+                continue
+            predictions.append(
+                Prediction(
+                    id=row[0],
+                    author_id=row[1],
+                    author_name=row[2],
+                    channel_id=row[3],
+                    target_date=target_date,
+                    prediction_text=row[5],
+                    created_at=created_at,
+                    posted=bool(row[7]),
+                    posted_at=parse_datetime_safe(row[8]),
+                    retry_count=row[9],
+                )
             )
-            for row in rows
-        ]
+        return predictions
 
     async def mark_prediction_posted(self, prediction_id: int) -> None:
         """Mark a prediction as posted."""

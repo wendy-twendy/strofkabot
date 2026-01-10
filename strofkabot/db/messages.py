@@ -5,6 +5,8 @@
 import datetime
 from dataclasses import dataclass
 
+from strofkabot.db.base import parse_datetime_safe
+
 
 @dataclass
 class Message:
@@ -25,15 +27,14 @@ class MessagesMixin:
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
-        async with self.conn.executemany(
+        await self.conn.executemany(
             """
             INSERT OR REPLACE INTO messages
             (id, content, timestamp, reaction_count, author_id, reply_to_id, reply_to_author, reply_to_content)
             VALUES (:id, :content, :timestamp, :reaction_count, :author_id, :reply_to_id, :reply_to_author, :reply_to_content)
         """,
             [msg.__dict__ for msg in messages],
-        ):
-            pass
+        )
         await self.conn.commit()
 
     async def update_last_scanned_timestamp(self, channel_id: int, timestamp: datetime.datetime):
@@ -58,7 +59,7 @@ class MessagesMixin:
         async with self.conn.execute("SELECT value FROM metadata WHERE key = ?", (key,)) as cursor:
             row = await cursor.fetchone()
             if row:
-                return datetime.datetime.fromisoformat(row[0])
+                return parse_datetime_safe(row[0])
             return None
 
     async def get_random_message(self) -> Message | None:
@@ -68,10 +69,13 @@ class MessagesMixin:
         async with self.conn.execute("SELECT * FROM messages ORDER BY RANDOM() LIMIT 1") as cursor:
             row = await cursor.fetchone()
             if row:
+                timestamp = parse_datetime_safe(row[2])
+                if timestamp is None:
+                    return None
                 return Message(
                     id=row[0],
                     content=row[1],
-                    timestamp=datetime.datetime.fromisoformat(row[2]),
+                    timestamp=timestamp,
                     reaction_count=row[3],
                     author_id=row[4],
                     reply_to_id=row[5],

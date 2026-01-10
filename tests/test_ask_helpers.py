@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 import pytest
 
-from strofkabot.openrouter_client import QueryMetadata
+from strofkabot.openrouter import QueryMetadata
 from strofkabot.utils.ask_helpers import (
     build_system_prompt,
     format_error_response,

@@ -30,6 +30,13 @@ python3 -m venv .venv
 
 Follow TDD: write tests first, verify they fail, then write code and confirm tests pass.
 
+**When making AI-related changes** (to `openrouter_client.py`, `gemini_client.py`, `cogs/ai.py`, or `utils/ask_helpers.py`), run the E2E tests to verify the AI functionality still works correctly:
+
+```bash
+# Run AI E2E tests (requires OPENROUTER_API_KEY in .env)
+set -a && source .env && set +a && .venv/bin/pytest tests/e2e/test_ask_e2e.py -v -m e2e
+```
+
 ## Container (Production)
 
 The bot runs as a Podman container via systemd Quadlet. See `PODMAN.md` for details.

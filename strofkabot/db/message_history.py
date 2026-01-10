@@ -5,6 +5,8 @@
 import datetime
 from dataclasses import dataclass
 
+from strofkabot.db.base import validate_month, validate_timezone_offset
+
 
 @dataclass
 class HistoryMessage:
@@ -31,7 +33,7 @@ class MessageHistoryMixin:
         await self.ensure_connection()
         if not self.conn:
             raise RuntimeError("Database not initialized.")
-        async with self.conn.executemany(
+        await self.conn.executemany(
             """
             INSERT OR REPLACE INTO message_history
             (id, channel_id, channel_name, author_id, author_name, content, timestamp,
@@ -55,8 +57,7 @@ class MessageHistoryMixin:
                 }
                 for msg in messages
             ],
-        ):
-            pass
+        )
         await self.conn.commit()
 
     async def get_last_message_id(self, channel_id: int) -> int | None:
@@ -112,7 +113,8 @@ class MessageHistoryMixin:
         if not self.conn:
             raise RuntimeError("Database not initialized.")
 
-        # Build timezone offset string for SQLite datetime modifier
+        # Validate and build timezone offset string for SQLite datetime modifier
+        timezone_offset = validate_timezone_offset(timezone_offset)
         offset_str = f"{timezone_offset:+d} hours"
 
         query = """
@@ -151,7 +153,9 @@ class MessageHistoryMixin:
         if not self.conn:
             raise RuntimeError("Database not initialized.")
 
-        # Build timezone offset string for SQLite datetime modifier
+        # Validate inputs
+        month = validate_month(month)
+        timezone_offset = validate_timezone_offset(timezone_offset)
         offset_str = f"{timezone_offset:+d} hours"
 
         query = """

@@ -2,9 +2,8 @@
 
 """On This Day operations mixin for the database."""
 
-import datetime
-
 from strofkabot.db.attachments import Attachment
+from strofkabot.db.base import parse_datetime_safe, validate_day, validate_month
 from strofkabot.db.messages import Message
 
 
@@ -25,6 +24,9 @@ class OnThisDayMixin:
         if not self.conn:
             raise RuntimeError("Database not initialized.")
 
+        # Validate inputs
+        month = validate_month(month)
+        day = validate_day(day)
         month_day = f"{month:02d}-{day:02d}"
 
         query = """
@@ -60,6 +62,9 @@ class OnThisDayMixin:
         if not self.conn:
             raise RuntimeError("Database not initialized.")
 
+        # Validate inputs
+        month = validate_month(month)
+        day = validate_day(day)
         date_prefix = f"{year:04d}-{month:02d}-{day:02d}"
 
         # Get top message
@@ -87,28 +92,32 @@ class OnThisDayMixin:
         top_attachment = None
 
         if msg_row:
-            top_message = Message(
-                id=msg_row[0],
-                content=msg_row[1],
-                timestamp=datetime.datetime.fromisoformat(msg_row[2]),
-                reaction_count=msg_row[3],
-                author_id=msg_row[4],
-                reply_to_id=msg_row[5],
-                reply_to_author=msg_row[6],
-                reply_to_content=msg_row[7],
-            )
+            msg_timestamp = parse_datetime_safe(msg_row[2])
+            if msg_timestamp:
+                top_message = Message(
+                    id=msg_row[0],
+                    content=msg_row[1],
+                    timestamp=msg_timestamp,
+                    reaction_count=msg_row[3],
+                    author_id=msg_row[4],
+                    reply_to_id=msg_row[5],
+                    reply_to_author=msg_row[6],
+                    reply_to_content=msg_row[7],
+                )
 
         if att_row:
-            top_attachment = Attachment(
-                id=att_row[0],
-                message_id=att_row[1],
-                message_content=att_row[2],
-                author_id=att_row[3],
-                timestamp=datetime.datetime.fromisoformat(att_row[4]),
-                reaction_count=att_row[5],
-                original_filename=att_row[6],
-                local_path=att_row[7],
-            )
+            att_timestamp = parse_datetime_safe(att_row[4])
+            if att_timestamp:
+                top_attachment = Attachment(
+                    id=att_row[0],
+                    message_id=att_row[1],
+                    message_content=att_row[2],
+                    author_id=att_row[3],
+                    timestamp=att_timestamp,
+                    reaction_count=att_row[5],
+                    original_filename=att_row[6],
+                    local_path=att_row[7],
+                )
 
         # Return the one with higher reaction count
         if top_message and top_attachment:

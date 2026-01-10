@@ -125,7 +125,7 @@ class StatsMixin:
         await self.ensure_connection()
         query = """
             SELECT s.author_id, m.username, s.total_messages, s.total_reactions,
-                CAST(s.total_reactions AS FLOAT) / s.total_messages AS avg_reactions
+                CAST(s.total_reactions AS FLOAT) / NULLIF(s.total_messages, 0) AS avg_reactions
             FROM user_stats_monthly s
             LEFT JOIN user_mapping m ON s.author_id = m.author_id
             WHERE s.year = ? AND s.month = ?
@@ -140,7 +140,7 @@ class StatsMixin:
         async with self.conn.execute(
             """
             SELECT s.total_messages, s.total_reactions,
-                CAST(s.total_reactions AS FLOAT) / s.total_messages AS avg_reactions
+                CAST(s.total_reactions AS FLOAT) / NULLIF(s.total_messages, 0) AS avg_reactions
             FROM user_stats_monthly s
             WHERE s.author_id = ? AND s.year = ? AND s.month = ?
         """,
@@ -285,7 +285,10 @@ class StatsMixin:
         ) as cursor:
             total_data = await cursor.fetchone()
 
-        total_given, total_received = total_data
+        if total_data is None:
+            total_given, total_received = 0, 0
+        else:
+            total_given, total_received = total_data
         return {
             "exports": export_data,
             "imports": import_data,
@@ -349,7 +352,10 @@ class StatsMixin:
         ) as cursor:
             total_data = await cursor.fetchone()
 
-        total_given, total_received = total_data
+        if total_data is None:
+            total_given, total_received = 0, 0
+        else:
+            total_given, total_received = total_data
         return {
             "exports": export_data,
             "imports": import_data,

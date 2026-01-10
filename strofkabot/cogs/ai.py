@@ -3,6 +3,7 @@
 import asyncio
 import datetime
 import logging
+from collections import OrderedDict
 
 import discord
 from discord.ext import commands
@@ -17,7 +18,7 @@ from strofkabot.config import (
 from strofkabot.discord_db import Database
 from strofkabot.gemini_client import GeminiClient
 from strofkabot.memory_store import Memory, MemoryStore
-from strofkabot.openrouter_client import OpenRouterClient
+from strofkabot.openrouter import OpenRouterClient
 from strofkabot.url_extractor import extract_urls_from_messages, format_url_context
 from strofkabot.utils import (
     build_system_prompt,
@@ -30,6 +31,9 @@ from strofkabot.utils import (
     prepare_context,
     split_response,
 )
+
+# Maximum number of channel locks to keep in memory
+MAX_CHANNEL_LOCKS = 100
 
 
 class AICog(commands.Cog):
@@ -48,14 +52,37 @@ class AICog(commands.Cog):
         self.memory_store = memory_store
         self._gemini_client: GeminiClient | None = None
         self._openrouter_client: OpenRouterClient | None = None
-        self._channel_locks: dict[int, asyncio.Lock] = {}
+        # Use OrderedDict for LRU-style eviction of channel locks
+        self._channel_locks: OrderedDict[int, asyncio.Lock] = OrderedDict()
         self._nicknames = load_nicknames(NICKNAMES_FILE)
 
     def _get_channel_lock(self, channel_id: int) -> asyncio.Lock:
-        """Get or create a lock for a specific channel."""
-        if channel_id not in self._channel_locks:
-            self._channel_locks[channel_id] = asyncio.Lock()
-        return self._channel_locks[channel_id]
+        """Get or create a lock for a specific channel.
+
+        Uses LRU eviction to prevent unbounded memory growth.
+        """
+        if channel_id in self._channel_locks:
+            # Move to end (most recently used)
+            self._channel_locks.move_to_end(channel_id)
+            return self._channel_locks[channel_id]
+
+        # Create new lock
+        lock = asyncio.Lock()
+        self._channel_locks[channel_id] = lock
+
+        # Evict oldest locks if over limit (only if not currently held)
+        while len(self._channel_locks) > MAX_CHANNEL_LOCKS:
+            oldest_id, oldest_lock = next(iter(self._channel_locks.items()))
+            if not oldest_lock.locked():
+                del self._channel_locks[oldest_id]
+            else:
+                # Can't evict a locked lock, move it to end and try next
+                self._channel_locks.move_to_end(oldest_id)
+                # If all locks are held, allow temporary overflow
+                if all(lock.locked() for lock in self._channel_locks.values()):
+                    break
+
+        return lock
 
     @property
     def openrouter_client(self) -> OpenRouterClient | None:
@@ -283,12 +310,69 @@ class AICog(commands.Cog):
             known_users[user_name.lower()] = user_id
             id_to_name[user_id] = user_name
 
+            # Load existing memories for context (helps detect duplicates and updates)
+            existing_user_memories = await self.memory_store.get_user_memories(user_id)
+            existing_server_memories = await self.memory_store.get_server_memories()
+
             # Extract memories using tool calling
             extracted = await self.openrouter_client.extract_memories(
-                context_dicts, question, response_text, user_id, user_name, known_users
+                context_dicts,
+                question,
+                response_text,
+                user_id,
+                user_name,
+                known_users,
+                existing_user_memories=existing_user_memories,
+                existing_server_memories=existing_server_memories,
             )
 
-            # Process user memories (user_id already validated by tool schema)
+            # Process user memory invalidations first (before saves/updates)
+            for inv_data in extracted.get("user_invalidations", []):
+                target_user_id = inv_data.get("user_id")
+                text_match = inv_data.get("text_match", "")
+                if target_user_id and text_match:
+                    if await self.memory_store.invalidate_user_memory(target_user_id, text_match):
+                        self.logger.info(f"Invalidated user memory: '{text_match}'")
+
+            # Process server memory invalidations
+            for inv_data in extracted.get("server_invalidations", []):
+                text_match = inv_data.get("text_match", "")
+                if text_match:
+                    if await self.memory_store.invalidate_server_memory(text_match):
+                        self.logger.info(f"Invalidated server memory: '{text_match}'")
+
+            # Process user memory updates
+            for upd_data in extracted.get("user_updates", []):
+                target_user_id = upd_data.get("user_id")
+                old_match = upd_data.get("old_match", "")
+                new_text = upd_data.get("new_memory_text", "")
+                if target_user_id and old_match and new_text:
+                    new_memory = Memory(
+                        text=new_text,
+                        category=upd_data.get("category", "facts"),
+                        importance=upd_data.get("importance", 5),
+                    )
+                    if await self.memory_store.update_user_memory(
+                        target_user_id, old_match, new_memory
+                    ):
+                        self.logger.info(f"Updated user memory: '{old_match}' -> '{new_text[:50]}'")
+
+            # Process server memory updates
+            for upd_data in extracted.get("server_updates", []):
+                old_match = upd_data.get("old_match", "")
+                new_text = upd_data.get("new_memory_text", "")
+                if old_match and new_text:
+                    new_memory = Memory(
+                        text=new_text,
+                        category=upd_data.get("category", "knowledge"),
+                        importance=upd_data.get("importance", 7),
+                    )
+                    if await self.memory_store.update_server_memory(old_match, new_memory):
+                        self.logger.info(
+                            f"Updated server memory: '{old_match}' -> '{new_text[:50]}'"
+                        )
+
+            # Process new user memories
             for mem_data in extracted.get("user_memories", []):
                 memory_text = mem_data.get("memory_text", "")
                 if not memory_text:
@@ -310,11 +394,13 @@ class AICog(commands.Cog):
                     text=memory_text,
                     category=mem_data.get("category", "facts"),
                     importance=mem_data.get("importance", 5),
+                    confidence=mem_data.get("confidence", 1.0),
+                    tags=mem_data.get("tags", []),
                 )
                 await self.memory_store.add_user_memory(target_user_id, memory, target_user_name)
                 self.logger.info(f"Saved user memory for {target_user_name}: {memory_text[:50]}")
 
-            # Process server memories (importance >= 7 already enforced by tool schema)
+            # Process new server memories
             for mem_data in extracted.get("server_memories", []):
                 memory_text = mem_data.get("memory_text", "")
                 if not memory_text:
@@ -329,6 +415,8 @@ class AICog(commands.Cog):
                     text=memory_text,
                     category=mem_data.get("category", "knowledge"),
                     importance=mem_data.get("importance", 7),
+                    confidence=mem_data.get("confidence", 1.0),
+                    tags=mem_data.get("tags", []),
                 )
                 await self.memory_store.add_server_memory(memory)
                 self.logger.info(f"Saved server memory: {memory_text[:50]}")

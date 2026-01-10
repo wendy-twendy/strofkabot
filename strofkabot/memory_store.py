@@ -25,6 +25,8 @@ class Memory:
     text: str
     category: str
     importance: int
+    confidence: float = 1.0  # 0.5-1.0: 1.0 = explicit, 0.8 = implied, 0.6 = inferred
+    tags: list[str] = field(default_factory=list)  # Keywords for retrieval
     created_at: datetime = field(default_factory=lambda: datetime.now(UTC))
     last_accessed: datetime | None = None
     access_count: int = 0
@@ -35,6 +37,8 @@ class Memory:
             "text": self.text,
             "category": self.category,
             "importance": self.importance,
+            "confidence": self.confidence,
+            "tags": self.tags,
             "created_at": self.created_at.isoformat(),
             "last_accessed": self.last_accessed.isoformat() if self.last_accessed else None,
             "access_count": self.access_count,
@@ -52,6 +56,8 @@ class Memory:
             text=data["text"],
             category=data["category"],
             importance=data["importance"],
+            confidence=data.get("confidence", 1.0),  # Default for old memories
+            tags=data.get("tags", []),  # Default for old memories
             created_at=created_at,
             last_accessed=last_accessed,
             access_count=data.get("access_count", 0),
@@ -339,3 +345,109 @@ class MemoryStore:
 
         await self._write_server_data(data)
         logger.info(f"Pruned server memories: {len(memories)} -> {limit}")
+
+    async def update_user_memory(
+        self, user_id: int, old_text_match: str, new_memory: Memory
+    ) -> bool:
+        """Update an existing user memory with new information.
+
+        Args:
+            user_id: Discord user ID.
+            old_text_match: Text to match in existing memory (case-insensitive partial match).
+            new_memory: The new memory to replace the matched one.
+
+        Returns:
+            True if a memory was updated, False if no match found.
+        """
+        data = await self._read_user_data(user_id)
+        old_text_lower = old_text_match.lower()
+
+        for i, mem_dict in enumerate(data["memories"]):
+            if old_text_lower in mem_dict["text"].lower():
+                # Preserve access stats from old memory
+                new_memory.access_count = mem_dict.get("access_count", 0)
+                new_memory.last_accessed = datetime.now(UTC)
+                data["memories"][i] = new_memory.to_dict()
+                await self._write_user_data(user_id, data)
+                logger.info(
+                    f"Updated user {user_id} memory: '{old_text_match}' -> '{new_memory.text[:50]}...'"
+                )
+                return True
+
+        return False
+
+    async def update_server_memory(self, old_text_match: str, new_memory: Memory) -> bool:
+        """Update an existing server memory with new information.
+
+        Args:
+            old_text_match: Text to match in existing memory (case-insensitive partial match).
+            new_memory: The new memory to replace the matched one.
+
+        Returns:
+            True if a memory was updated, False if no match found.
+        """
+        data = await self._read_server_data()
+        old_text_lower = old_text_match.lower()
+
+        for i, mem_dict in enumerate(data["memories"]):
+            if old_text_lower in mem_dict["text"].lower():
+                # Preserve access stats from old memory
+                new_memory.access_count = mem_dict.get("access_count", 0)
+                new_memory.last_accessed = datetime.now(UTC)
+                data["memories"][i] = new_memory.to_dict()
+                await self._write_server_data(data)
+                logger.info(
+                    f"Updated server memory: '{old_text_match}' -> '{new_memory.text[:50]}...'"
+                )
+                return True
+
+        return False
+
+    async def invalidate_user_memory(self, user_id: int, text_match: str) -> bool:
+        """Remove a user memory by partial text match.
+
+        Args:
+            user_id: Discord user ID.
+            text_match: Text to match in memory (case-insensitive partial match).
+
+        Returns:
+            True if a memory was removed, False if no match found.
+        """
+        data = await self._read_user_data(user_id)
+        original_count = len(data["memories"])
+        text_lower = text_match.lower()
+
+        # Remove memories that contain the match text
+        data["memories"] = [m for m in data["memories"] if text_lower not in m["text"].lower()]
+
+        if len(data["memories"]) < original_count:
+            await self._write_user_data(user_id, data)
+            removed_count = original_count - len(data["memories"])
+            logger.info(f"Invalidated {removed_count} memory(s) for user {user_id}: '{text_match}'")
+            return True
+
+        return False
+
+    async def invalidate_server_memory(self, text_match: str) -> bool:
+        """Remove a server memory by partial text match.
+
+        Args:
+            text_match: Text to match in memory (case-insensitive partial match).
+
+        Returns:
+            True if a memory was removed, False if no match found.
+        """
+        data = await self._read_server_data()
+        original_count = len(data["memories"])
+        text_lower = text_match.lower()
+
+        # Remove memories that contain the match text
+        data["memories"] = [m for m in data["memories"] if text_lower not in m["text"].lower()]
+
+        if len(data["memories"]) < original_count:
+            await self._write_server_data(data)
+            removed_count = original_count - len(data["memories"])
+            logger.info(f"Invalidated {removed_count} server memory(s): '{text_match}'")
+            return True
+
+        return False

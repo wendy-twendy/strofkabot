@@ -811,8 +811,8 @@ class TestAttachmentOperations:
         """Test that attachment_exists returns False for non-existing attachment."""
         assert await message_database.attachment_exists(99999) is False
 
-    async def test_upsert_attachment_updates_existing(self, message_database: Database):
-        """Test that adding an attachment with existing ID updates it (INSERT OR REPLACE)."""
+    async def test_insert_attachment_ignores_duplicate(self, message_database: Database):
+        """Test that adding an attachment with existing ID is ignored (INSERT OR IGNORE)."""
         attachment1 = Attachment(
             id=100,
             message_id=1000,
@@ -843,9 +843,10 @@ class TestAttachmentOperations:
         ) as cursor:
             row = await cursor.fetchone()
 
-        assert row[0] == "Updated"
-        assert row[1] == 10
-        assert row[2] == "1000/100_updated.jpg"
+        # With INSERT OR IGNORE, the original attachment is preserved
+        assert row[0] == "Original"
+        assert row[1] == 5
+        assert row[2] == "1000/100.jpg"
 
 
 class TestOnThisDayOperations:

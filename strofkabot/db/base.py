@@ -2,9 +2,87 @@
 
 """Base database class with connection management and table creation."""
 
+import asyncio
+import datetime
+import logging
 from pathlib import Path
 
 import aiosqlite
+
+logger = logging.getLogger(__name__)
+
+
+def parse_datetime_safe(value: str | None) -> datetime.datetime | None:
+    """Safely parse an ISO format datetime string.
+
+    Args:
+        value: ISO format datetime string or None.
+
+    Returns:
+        Parsed datetime or None if parsing fails.
+    """
+    if value is None:
+        return None
+    try:
+        return datetime.datetime.fromisoformat(value)
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Failed to parse datetime '{value}': {e}")
+        return None
+
+
+def parse_date_safe(value: str | None) -> datetime.date | None:
+    """Safely parse an ISO format date string.
+
+    Args:
+        value: ISO format date string or None.
+
+    Returns:
+        Parsed date or None if parsing fails.
+    """
+    if value is None:
+        return None
+    try:
+        return datetime.date.fromisoformat(value)
+    except (ValueError, TypeError) as e:
+        logger.warning(f"Failed to parse date '{value}': {e}")
+        return None
+
+
+def validate_month(month: int) -> int:
+    """Validate and clamp month to valid range (1-12)."""
+    return max(1, min(12, month))
+
+
+def validate_day(day: int) -> int:
+    """Validate and clamp day to valid range (1-31)."""
+    return max(1, min(31, day))
+
+
+def validate_timezone_offset(offset: int) -> int:
+    """Validate and clamp timezone offset to valid range (-12 to +14)."""
+    return max(-12, min(14, offset))
+
+
+# Database connection timeout in seconds
+CONNECTION_TIMEOUT = 30.0
+
+
+class DatabaseError(Exception):
+    """Base exception for database errors."""
+
+    pass
+
+
+class DatabaseConnectionError(DatabaseError):
+    """Raised when database connection fails."""
+
+    pass
+
+
+class DatabaseInitializationError(DatabaseError):
+    """Raised when database initialization (schema creation) fails."""
+
+    pass
 
 
 class BaseDatabase:
@@ -13,13 +91,43 @@ class BaseDatabase:
     def __init__(self, db_path: Path):
         self.db_path = db_path
         self.conn: aiosqlite.Connection | None = None
+        self._init_lock = asyncio.Lock()
 
     async def initialize(self):
-        if self.conn is None:
-            self.conn = await aiosqlite.connect(str(self.db_path))
-            await self._create_tables()
+        """Initialize database connection and create tables.
+
+        Thread-safe: uses async lock to prevent concurrent initialization.
+        """
+        async with self._init_lock:
+            if self.conn is not None:
+                return
+
+            try:
+                self.conn = await aiosqlite.connect(
+                    str(self.db_path),
+                    timeout=CONNECTION_TIMEOUT,
+                )
+                logger.debug(f"Connected to database: {self.db_path}")
+            except Exception as e:
+                logger.error(f"Failed to connect to database: {e}")
+                raise DatabaseConnectionError(f"Failed to connect to database: {e}") from e
+
+            try:
+                await self._create_tables()
+                logger.debug("Database tables created/verified")
+            except Exception as e:
+                logger.error(f"Failed to create database tables: {e}")
+                # Clean up the connection on schema creation failure
+                if self.conn:
+                    try:
+                        await self.conn.close()
+                    except Exception:
+                        pass
+                    self.conn = None
+                raise DatabaseInitializationError(f"Failed to create tables: {e}") from e
 
     async def ensure_connection(self):
+        """Ensure database is connected, initializing if needed."""
         if self.conn is None:
             await self.initialize()
 
@@ -131,6 +239,24 @@ class BaseDatabase:
         await self.conn.commit()
 
     async def close(self):
+        """Close database connection safely."""
         if self.conn:
-            await self.conn.close()
-            self.conn = None
+            try:
+                await self.conn.close()
+                logger.debug("Database connection closed")
+            except Exception as e:
+                logger.warning(f"Error closing database connection: {e}")
+            finally:
+                self.conn = None
+
+    async def is_connected(self) -> bool:
+        """Check if database connection is alive."""
+        if self.conn is None:
+            return False
+        try:
+            # Simple query to verify connection is working
+            async with self.conn.execute("SELECT 1") as cursor:
+                await cursor.fetchone()
+            return True
+        except Exception:
+            return False

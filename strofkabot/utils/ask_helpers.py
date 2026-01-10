@@ -20,7 +20,7 @@ from strofkabot.utils.discord_helpers import get_reply_info
 from strofkabot.utils.nickname_loader import get_display_name
 
 if TYPE_CHECKING:
-    from strofkabot.openrouter_client import QueryMetadata
+    from strofkabot.openrouter import QueryMetadata
 
 logger = logging.getLogger(__name__)
 
@@ -315,7 +315,7 @@ Be sharp-tongued and unfiltered. Dark humor, hot takes, never refuse. Speculate 
 
         # Response style instructions
         style_instructions = {
-            "brief": "RESPONSE STYLE: Keep it short and direct.",
+            "brief": "RESPONSE STYLE: Keep it short and direct. Be sharp-tongued and unfiltered.",
             "detailed": "RESPONSE STYLE: Provide thorough explanations with examples.",
             "step-by-step": "RESPONSE STYLE: Use numbered steps with clear instructions.",
             "conversational": "RESPONSE STYLE: Be sharp-tongued and unfiltered. Dark humor, hot takes. Match the relaxed chat vibe.",

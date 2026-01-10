@@ -5,7 +5,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-from strofkabot.openrouter_client import OpenRouterClient, OpenRouterResponse, QueryMetadata
+from strofkabot.openrouter import OpenRouterClient, OpenRouterResponse, QueryMetadata
 
 
 def make_metadata(

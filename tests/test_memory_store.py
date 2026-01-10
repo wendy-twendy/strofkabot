@@ -512,3 +512,264 @@ class TestMemoryTextLength:
 
         memories = await memory_store.get_user_memories(user_id)
         assert len(memories[0].text) == 200
+
+
+class TestConfidenceAndTags:
+    """Tests for confidence and tags fields."""
+
+    def test_memory_default_confidence(self):
+        """Test that Memory has default confidence of 1.0."""
+        memory = Memory(text="Test", category="general", importance=5)
+        assert memory.confidence == 1.0
+
+    def test_memory_default_tags(self):
+        """Test that Memory has default empty tags list."""
+        memory = Memory(text="Test", category="general", importance=5)
+        assert memory.tags == []
+
+    def test_memory_with_confidence_and_tags(self):
+        """Test creating Memory with confidence and tags."""
+        memory = Memory(
+            text="Test",
+            category="interests",
+            importance=7,
+            confidence=0.8,
+            tags=["python", "programming"],
+        )
+        assert memory.confidence == 0.8
+        assert memory.tags == ["python", "programming"]
+
+    def test_memory_to_dict_includes_confidence_and_tags(self):
+        """Test that to_dict includes confidence and tags."""
+        memory = Memory(
+            text="Test",
+            category="facts",
+            importance=5,
+            confidence=0.9,
+            tags=["food", "preferences"],
+        )
+        data = memory.to_dict()
+
+        assert data["confidence"] == 0.9
+        assert data["tags"] == ["food", "preferences"]
+
+    def test_memory_from_dict_with_confidence_and_tags(self):
+        """Test that from_dict handles confidence and tags."""
+        data = {
+            "text": "Test memory",
+            "category": "facts",
+            "importance": 7,
+            "confidence": 0.75,
+            "tags": ["test", "demo"],
+            "created_at": "2025-01-09T12:00:00+00:00",
+            "last_accessed": None,
+            "access_count": 0,
+        }
+        memory = Memory.from_dict(data)
+
+        assert memory.confidence == 0.75
+        assert memory.tags == ["test", "demo"]
+
+    def test_memory_from_dict_defaults_for_old_data(self):
+        """Test that from_dict provides defaults for old data without new fields."""
+        data = {
+            "text": "Old memory",
+            "category": "facts",
+            "importance": 5,
+            "created_at": "2025-01-09T12:00:00+00:00",
+            "last_accessed": None,
+            "access_count": 0,
+        }
+        memory = Memory.from_dict(data)
+
+        assert memory.confidence == 1.0
+        assert memory.tags == []
+
+
+class TestUpdateMemory:
+    """Tests for memory update operations."""
+
+    async def test_update_user_memory_success(self, memory_store: MemoryStore):
+        """Test updating an existing user memory."""
+        user_id = 12345
+        original = Memory(text="Lives in New York", category="facts", importance=7)
+        await memory_store.add_user_memory(user_id, original)
+
+        new_memory = Memory(text="Lives in Berlin", category="facts", importance=7)
+        result = await memory_store.update_user_memory(user_id, "New York", new_memory)
+
+        assert result is True
+        memories = await memory_store.get_user_memories(user_id)
+        assert len(memories) == 1
+        assert memories[0].text == "Lives in Berlin"
+
+    async def test_update_user_memory_preserves_access_count(self, memory_store: MemoryStore):
+        """Test that update preserves access statistics."""
+        user_id = 12345
+        original = Memory(text="Prefers tea", category="preferences", importance=6)
+        await memory_store.add_user_memory(user_id, original)
+        await memory_store.mark_user_memory_accessed(user_id, "Prefers tea")
+        await memory_store.mark_user_memory_accessed(user_id, "Prefers tea")
+
+        new_memory = Memory(text="Prefers coffee now", category="preferences", importance=6)
+        await memory_store.update_user_memory(user_id, "Prefers tea", new_memory)
+
+        memories = await memory_store.get_user_memories(user_id)
+        assert memories[0].access_count == 2
+
+    async def test_update_user_memory_no_match(self, memory_store: MemoryStore):
+        """Test that update returns False when no match found."""
+        user_id = 12345
+        memory = Memory(text="Existing memory", category="facts", importance=5)
+        await memory_store.add_user_memory(user_id, memory)
+
+        new_memory = Memory(text="Updated text", category="facts", importance=5)
+        result = await memory_store.update_user_memory(user_id, "nonexistent", new_memory)
+
+        assert result is False
+
+    async def test_update_user_memory_case_insensitive(self, memory_store: MemoryStore):
+        """Test that update matching is case-insensitive."""
+        user_id = 12345
+        original = Memory(text="Loves Pizza", category="preferences", importance=6)
+        await memory_store.add_user_memory(user_id, original)
+
+        new_memory = Memory(text="Loves Pasta", category="preferences", importance=6)
+        result = await memory_store.update_user_memory(user_id, "pizza", new_memory)
+
+        assert result is True
+        memories = await memory_store.get_user_memories(user_id)
+        assert memories[0].text == "Loves Pasta"
+
+    async def test_update_server_memory_success(self, memory_store: MemoryStore):
+        """Test updating an existing server memory."""
+        original = Memory(
+            text="Server was founded in 2020",
+            category="knowledge",
+            importance=8,
+        )
+        await memory_store.add_server_memory(original)
+
+        new_memory = Memory(
+            text="Server was founded in 2019",
+            category="knowledge",
+            importance=8,
+        )
+        result = await memory_store.update_server_memory("founded in 2020", new_memory)
+
+        assert result is True
+        memories = await memory_store.get_server_memories()
+        assert len(memories) == 1
+        assert memories[0].text == "Server was founded in 2019"
+
+    async def test_update_server_memory_no_match(self, memory_store: MemoryStore):
+        """Test that server update returns False when no match found."""
+        memory = Memory(text="Existing server memory", category="knowledge", importance=7)
+        await memory_store.add_server_memory(memory)
+
+        new_memory = Memory(text="Updated text", category="knowledge", importance=7)
+        result = await memory_store.update_server_memory("nonexistent", new_memory)
+
+        assert result is False
+
+
+class TestInvalidateMemory:
+    """Tests for memory invalidation operations."""
+
+    async def test_invalidate_user_memory_success(self, memory_store: MemoryStore):
+        """Test invalidating (removing) a user memory."""
+        user_id = 12345
+        memory = Memory(text="Likes jazz music", category="preferences", importance=6)
+        await memory_store.add_user_memory(user_id, memory)
+
+        result = await memory_store.invalidate_user_memory(user_id, "jazz")
+
+        assert result is True
+        memories = await memory_store.get_user_memories(user_id)
+        assert len(memories) == 0
+
+    async def test_invalidate_user_memory_no_match(self, memory_store: MemoryStore):
+        """Test that invalidate returns False when no match found."""
+        user_id = 12345
+        memory = Memory(text="Existing memory", category="facts", importance=5)
+        await memory_store.add_user_memory(user_id, memory)
+
+        result = await memory_store.invalidate_user_memory(user_id, "nonexistent")
+
+        assert result is False
+        memories = await memory_store.get_user_memories(user_id)
+        assert len(memories) == 1
+
+    async def test_invalidate_user_memory_case_insensitive(self, memory_store: MemoryStore):
+        """Test that invalidate matching is case-insensitive."""
+        user_id = 12345
+        memory = Memory(text="Works at GOOGLE", category="facts", importance=7)
+        await memory_store.add_user_memory(user_id, memory)
+
+        result = await memory_store.invalidate_user_memory(user_id, "google")
+
+        assert result is True
+        memories = await memory_store.get_user_memories(user_id)
+        assert len(memories) == 0
+
+    async def test_invalidate_user_memory_partial_match(self, memory_store: MemoryStore):
+        """Test that invalidate works with partial text match."""
+        user_id = 12345
+        memory = Memory(
+            text="Really enjoys playing chess on weekends",
+            category="interests",
+            importance=5,
+        )
+        await memory_store.add_user_memory(user_id, memory)
+
+        result = await memory_store.invalidate_user_memory(user_id, "chess")
+
+        assert result is True
+        memories = await memory_store.get_user_memories(user_id)
+        assert len(memories) == 0
+
+    async def test_invalidate_user_memory_removes_only_matching(self, memory_store: MemoryStore):
+        """Test that invalidate only removes matching memories."""
+        user_id = 12345
+        await memory_store.add_user_memory(
+            user_id, Memory(text="Likes jazz", category="preferences", importance=6)
+        )
+        await memory_store.add_user_memory(
+            user_id, Memory(text="Works as engineer", category="facts", importance=7)
+        )
+        await memory_store.add_user_memory(
+            user_id, Memory(text="Lives in Berlin", category="facts", importance=7)
+        )
+
+        result = await memory_store.invalidate_user_memory(user_id, "jazz")
+
+        assert result is True
+        memories = await memory_store.get_user_memories(user_id)
+        assert len(memories) == 2
+        assert all("jazz" not in m.text.lower() for m in memories)
+
+    async def test_invalidate_server_memory_success(self, memory_store: MemoryStore):
+        """Test invalidating (removing) a server memory."""
+        memory = Memory(
+            text="Old running joke that is no longer funny",
+            category="jokes",
+            importance=7,
+        )
+        await memory_store.add_server_memory(memory)
+
+        result = await memory_store.invalidate_server_memory("running joke")
+
+        assert result is True
+        memories = await memory_store.get_server_memories()
+        assert len(memories) == 0
+
+    async def test_invalidate_server_memory_no_match(self, memory_store: MemoryStore):
+        """Test that server invalidate returns False when no match found."""
+        memory = Memory(text="Existing server memory", category="knowledge", importance=7)
+        await memory_store.add_server_memory(memory)
+
+        result = await memory_store.invalidate_server_memory("nonexistent")
+
+        assert result is False
+        memories = await memory_store.get_server_memories()
+        assert len(memories) == 1
