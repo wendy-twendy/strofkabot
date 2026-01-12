@@ -17,6 +17,8 @@ google-genai>=1.55.0
 openai>=1.0.0
 trafilatura
 imageio[ffmpeg]
+lancedb>=0.4.0
+rank-bm25>=0.2.2
 
 # Testing
 pytest>=7.4.0

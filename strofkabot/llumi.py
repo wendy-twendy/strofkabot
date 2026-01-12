@@ -17,6 +17,7 @@ from strofkabot.cogs import (
     EconomicsCog,
     EntertainmentCog,
     NetworkCog,
+    RAGCog,
     UserStatsCog,
 )
 from strofkabot.config import (
@@ -91,6 +92,9 @@ class LlumiBot(commands.Cog):
 
         ai_cog = AICog(self.bot, self.db, self.logger, memory_store=self.memory_store)
         await self.bot.add_cog(ai_cog)
+
+        rag_cog = RAGCog(self.bot, self.db, self.logger)
+        await self.bot.add_cog(rag_cog)
 
         self.logger.info("All cogs loaded successfully")
 

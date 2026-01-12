@@ -65,6 +65,7 @@ class OpenRouterClient:
         images: list[dict] | None = None,
         query_metadata: QueryMetadata | None = None,
         url_context: str | None = None,
+        rag_context: str | None = None,
     ) -> OpenRouterResponse:
         """Send a question to OpenRouter with conversation context.
 
@@ -75,6 +76,7 @@ class OpenRouterClient:
             images: Optional list of image dicts with data (base64) and mime_type.
             query_metadata: Optional pre-computed metadata (skips classification).
             url_context: Optional extracted URL content to include in context.
+            rag_context: Optional RAG extraction from server history.
 
         Returns:
             OpenRouterResponse with the model's answer or error details.
@@ -94,7 +96,7 @@ class OpenRouterClient:
 
             # Build messages in OpenAI format
             messages = self._build_messages(
-                question, system_prompt, context_messages, images, url_context
+                question, system_prompt, context_messages, images, url_context, rag_context
             )
 
             # Build extra_body for reasoning
@@ -210,15 +212,20 @@ class OpenRouterClient:
         context_messages: list[dict],
         images: list[dict] | None = None,
         url_context: str | None = None,
+        rag_context: str | None = None,
     ) -> list[dict]:
         """Build the messages list for the OpenAI-compatible API."""
         messages = [{"role": "system", "content": system_prompt}]
 
         # Add context if provided
-        if context_messages or url_context:
+        if context_messages or url_context or rag_context:
             context_parts = []
             if context_messages:
                 context_parts.append(self._format_context(context_messages))
+            if rag_context:
+                context_parts.append(
+                    f"SERVER HISTORY (relevant past conversations):\n{rag_context}"
+                )
             if url_context:
                 context_parts.append(url_context)
             context_text = "\n\n".join(context_parts)
@@ -252,6 +259,7 @@ class OpenRouterClient:
             content = msg.get("content", "")
             timestamp = msg.get("timestamp", "")
             reply_to = msg.get("reply_to_author")
+            reply_to_content = msg.get("reply_to_content")
             image_count = msg.get("image_count", 0)
 
             # Build message attributes
@@ -260,6 +268,10 @@ class OpenRouterClient:
                 attrs.append('is_me="true"')
             if reply_to:
                 attrs.append(f'replying_to="{reply_to}"')
+            if reply_to_content:
+                # Escape quotes in content for XML attribute
+                escaped_content = reply_to_content.replace('"', "&quot;")
+                attrs.append(f'replied_content="{escaped_content}"')
             if image_count > 0:
                 attrs.append(f'images="{image_count}"')
 

@@ -79,11 +79,12 @@ class TestCogLoad:
             patch("strofkabot.llumi.EconomicsCog"),
             patch("strofkabot.llumi.NetworkCog"),
             patch("strofkabot.llumi.AICog"),
+            patch("strofkabot.llumi.RAGCog"),
         ):
             await cog.cog_load()
 
-        # Should have added 5 cogs
-        assert cog.bot.add_cog.call_count == 5
+        # Should have added 6 cogs (including RAGCog)
+        assert cog.bot.add_cog.call_count == 6
 
 
 class TestCogUnload:

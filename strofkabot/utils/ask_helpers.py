@@ -71,24 +71,30 @@ async def prepare_context(
     context = []
 
     for msg in messages:
-        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id = get_reply_info(msg)
+        reply_to_id, reply_to_author, reply_to_content, reply_to_author_id, reply_to_username = (
+            get_reply_info(msg)
+        )
 
         # Use nickname if available for reply-to author, or "Llumi" for bot messages
         if reply_to_author and reply_to_author_id:
             if reply_to_author_id == bot_user_id:
                 reply_to_author = "Llumi"  # Use consistent bot name
             else:
-                reply_to_author = get_display_name(reply_to_author_id, reply_to_author, nicknames)
+                reply_to_author = get_display_name(
+                    reply_to_author_id, reply_to_author, nicknames, reply_to_username
+                )
 
         image_attachments = [att for att in msg.attachments if is_image_attachment(att.filename)]
 
         context_entry = {
-            "author": get_display_name(msg.author.id, msg.author.display_name, nicknames),
+            "author": get_display_name(
+                msg.author.id, msg.author.display_name, nicknames, msg.author.name
+            ),
             "author_id": msg.author.id,
             "content": msg.content or "[no text]",
             "timestamp": msg.created_at.strftime("%H:%M"),
             "reply_to_author": reply_to_author,
-            "reply_to_content": reply_to_content[:100] if reply_to_content else None,
+            "reply_to_content": reply_to_content if reply_to_content else None,
             "image_count": len(image_attachments),
             "is_bot": bot_user_id is not None and msg.author.id == bot_user_id,
         }
@@ -304,7 +310,7 @@ Context: #{channel_name} | Asked by: {user_name} | {now.strftime('%B %d, %Y %H:%
             "technical": """TECHNICAL QUERY:
 Be helpful and precise. Use Discord code blocks for code. Explain clearly, mention pitfalls and best practices.""",
             "factual": """FACTUAL QUERY:
-Be accurate and direct. Cite sources when available. Distinguish facts from opinions.""",
+Be accurate and direct. Cite sources when available and format accordingly. Distinguish facts from opinions.""",
             "comparison": """COMPARISON QUERY:
 Be objective. Use structured pros/cons. Highlight key differences and tradeoffs.""",
             "creative": """CREATIVE QUERY:

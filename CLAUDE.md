@@ -30,7 +30,7 @@ python3 -m venv .venv
 
 Follow TDD: write tests first, verify they fail, then write code and confirm tests pass.
 
-**When making AI-related changes** (to `openrouter_client.py`, `gemini_client.py`, `cogs/ai.py`, or `utils/ask_helpers.py`), run the E2E tests to verify the AI functionality still works correctly:
+**When making big AI-related changes** (to `openrouter_client.py`, `gemini_client.py`, `cogs/ai.py`, or `utils/ask_helpers.py`), run the E2E tests to verify the AI functionality still works correctly, but use only for big changes:
 
 ```bash
 # Run AI E2E tests (requires OPENROUTER_API_KEY in .env)
@@ -121,6 +121,8 @@ strofkabot/
 - `update_usernames()` - Updates username cache every 24 hours
 
 **Database Layer** (async SQLite via aiosqlite):
+
+**IMPORTANT: Always use Python scripts to query the SQLite database, not the sqlite3 CLI.** This ensures consistency with the async database layer and avoids locking issues.
 
 Single unified database (`db.sqlite3`) with mixin-based architecture in `strofkabot/db/`:
 - `Database` class composes specialized mixins for separation of concerns

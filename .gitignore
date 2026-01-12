@@ -172,3 +172,10 @@ data/*.sqlite3
 data/*.json
 data/attachments/
 data/memories/
+data/vector_store/
+
+# Ruff linter cache
+.ruff_cache/
+
+# Backup files
+*.bak

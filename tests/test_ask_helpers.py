@@ -411,6 +411,7 @@ class TestPrepareContext:
         msg.author = MagicMock()
         msg.author.id = 12345
         msg.author.display_name = "TestUser"
+        msg.author.name = "TestUser"  # Same as display_name, so no (@username) suffix
         msg.content = "Hello world"
         msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
         msg.reference = None
@@ -484,12 +485,14 @@ class TestPrepareContext:
         replied_msg.author = MagicMock()
         replied_msg.author.id = 54321
         replied_msg.author.display_name = "OriginalUser"
+        replied_msg.author.name = "OriginalUser"  # Same as display_name
         replied_msg.content = "Original message content here"
 
         msg = MagicMock()
         msg.author = MagicMock()
         msg.author.id = 12345
         msg.author.display_name = "Replier"
+        msg.author.name = "Replier"  # Same as display_name
         msg.content = "My reply"
         msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
         msg.reference = MagicMock()
@@ -503,7 +506,7 @@ class TestPrepareContext:
 
     @pytest.mark.asyncio
     async def test_uses_nicknames_when_provided(self):
-        """Test that nicknames override display names when provided."""
+        """Test that nicknames override display names and include username."""
         from unittest.mock import MagicMock
 
         from strofkabot.utils.ask_helpers import prepare_context
@@ -512,6 +515,7 @@ class TestPrepareContext:
         msg.author = MagicMock()
         msg.author.id = 12345
         msg.author.display_name = "RealName"
+        msg.author.name = "realname123"  # Username differs from nickname
         msg.content = "Hello"
         msg.created_at = datetime(2024, 1, 15, 10, 30, tzinfo=UTC)
         msg.reference = None
@@ -521,7 +525,8 @@ class TestPrepareContext:
 
         result = await prepare_context([msg], nicknames=nicknames)
 
-        assert result[0]["author"] == "Nickname"
+        # With username included, format is "Nickname (@username)"
+        assert result[0]["author"] == "Nickname (@realname123)"
 
 
 class TestExtractImagesFromMessages:

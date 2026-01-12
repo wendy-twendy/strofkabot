@@ -149,16 +149,17 @@ async def send_personal_stats(ctx, year: int, month: int, user_stats) -> None:
 
 def get_reply_info(
     message: discord.Message,
-) -> tuple[int | None, str | None, str | None, int | None]:
+) -> tuple[int | None, str | None, str | None, int | None, str | None]:
     """Extract reply information from a Discord message.
 
     Returns:
-        Tuple of (reply_to_id, reply_to_author, reply_to_content, reply_to_author_id).
+        Tuple of (reply_to_id, reply_to_author, reply_to_content, reply_to_author_id, reply_to_username).
     """
     reply_to_id = None
     reply_to_author = None
     reply_to_content = None
     reply_to_author_id = None
+    reply_to_username = None
 
     if message.reference and message.reference.resolved:
         replied_msg = message.reference.resolved
@@ -175,8 +176,9 @@ def get_reply_info(
                 replied_msg.content if hasattr(replied_msg, "content") else "Content unavailable"
             )
             reply_to_author_id = replied_msg.author.id if replied_msg.author else None
+            reply_to_username = replied_msg.author.name if replied_msg.author else None
 
-    return reply_to_id, reply_to_author, reply_to_content, reply_to_author_id
+    return reply_to_id, reply_to_author, reply_to_content, reply_to_author_id, reply_to_username
 
 
 async def get_member_names(guild: discord.Guild, member_ids: list[int]) -> list[str]:

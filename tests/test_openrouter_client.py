@@ -56,6 +56,52 @@ class TestQueryMetadata:
         assert metadata.language == "sr"
         assert metadata.requires_citations is True
 
+    def test_rag_fields_default_to_none(self):
+        """Test that RAG fields default to None/False."""
+        metadata = QueryMetadata(
+            search=False,
+            thinking=False,
+            reasoning_effort="medium",
+            query_type="factual",
+            key_topics=[],
+            suggested_response_style="conversational",
+            language="en",
+            requires_citations=False,
+        )
+
+        assert metadata.needs_rag is False
+        assert metadata.rag_query is None
+        assert metadata.rag_queries is None
+        assert metadata.resolved_query is None
+        assert metadata.detected_entities is None
+        assert metadata.temporal_filter is None
+
+    def test_creates_metadata_with_enhanced_rag_fields(self):
+        """Test that metadata is created with all enhanced RAG fields."""
+        metadata = QueryMetadata(
+            search=False,
+            thinking=False,
+            reasoning_effort="medium",
+            query_type="factual",
+            key_topics=["politics"],
+            suggested_response_style="conversational",
+            language="en",
+            requires_citations=False,
+            needs_rag=True,
+            rag_query="Taka politics",  # Legacy
+            rag_queries=["Taka politics opinions", "Taka debate statements"],
+            resolved_query="What did Taka say about the politics debate?",
+            detected_entities=["Taka"],
+            temporal_filter={"after": "2026-01-10"},
+        )
+
+        assert metadata.needs_rag is True
+        assert metadata.rag_query == "Taka politics"
+        assert metadata.rag_queries == ["Taka politics opinions", "Taka debate statements"]
+        assert metadata.resolved_query == "What did Taka say about the politics debate?"
+        assert metadata.detected_entities == ["Taka"]
+        assert metadata.temporal_filter == {"after": "2026-01-10"}
+
 
 class TestOpenRouterResponse:
     """Tests for OpenRouterResponse dataclass."""
@@ -378,6 +424,99 @@ class TestClassifyQuery:
         assert result.reasoning_effort == "medium"
         assert result.query_type == "factual"
         assert result.language == "en"
+
+    @pytest.mark.asyncio
+    async def test_classifies_rag_required_question(self, client):
+        """Test classifying a question that needs RAG with enhanced fields."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "search": False,
+                "thinking": False,
+                "reasoning_effort": "medium",
+                "query_type": "factual",
+                "key_topics": ["Taka", "politics"],
+                "suggested_response_style": "conversational",
+                "language": "en",
+                "requires_citations": False,
+                "needs_rag": True,
+                "rag_queries": ["Taka politics opinions", "Taka debate statements"],
+                "resolved_query": "What did Taka say about the politics debate?",
+                "detected_entities": ["Taka"],
+                "temporal_filter": None,
+            }
+        )
+
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        result = await client.classify_query("What did he say about that?", [])
+
+        assert result.needs_rag is True
+        assert result.rag_queries == ["Taka politics opinions", "Taka debate statements"]
+        assert result.resolved_query == "What did Taka say about the politics debate?"
+        assert result.detected_entities == ["Taka"]
+        assert result.temporal_filter is None
+
+    @pytest.mark.asyncio
+    async def test_classifies_rag_with_temporal_filter(self, client):
+        """Test classifying a question with temporal filter."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "search": False,
+                "thinking": False,
+                "reasoning_effort": "medium",
+                "query_type": "factual",
+                "key_topics": ["yesterday"],
+                "suggested_response_style": "conversational",
+                "language": "en",
+                "requires_citations": False,
+                "needs_rag": True,
+                "rag_queries": ["discussions yesterday server"],
+                "resolved_query": "What happened yesterday?",
+                "detected_entities": [],
+                "temporal_filter": {"after": "2026-01-11", "before": "2026-01-12"},
+            }
+        )
+
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        result = await client.classify_query("What happened yesterday?", [])
+
+        assert result.needs_rag is True
+        assert result.temporal_filter == {"after": "2026-01-11", "before": "2026-01-12"}
+
+    @pytest.mark.asyncio
+    async def test_fallback_to_legacy_rag_query(self, client):
+        """Test that rag_queries is built from legacy rag_query if not provided."""
+        mock_response = MagicMock()
+        mock_response.choices = [MagicMock()]
+        mock_response.choices[0].message.content = json.dumps(
+            {
+                "search": False,
+                "thinking": False,
+                "reasoning_effort": "medium",
+                "query_type": "factual",
+                "key_topics": ["Taka"],
+                "suggested_response_style": "conversational",
+                "language": "en",
+                "requires_citations": False,
+                "needs_rag": True,
+                "rag_query": "Taka opinions",  # Legacy field only
+                # No rag_queries provided
+            }
+        )
+
+        client._client.chat.completions.create = AsyncMock(return_value=mock_response)
+
+        result = await client.classify_query("What does Taka think?", [])
+
+        assert result.needs_rag is True
+        assert result.rag_query == "Taka opinions"
+        # Should have built rag_queries from legacy rag_query
+        assert result.rag_queries == ["Taka opinions"]
 
 
 class TestAskWithContext:

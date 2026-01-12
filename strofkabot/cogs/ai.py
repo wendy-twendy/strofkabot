@@ -10,15 +10,26 @@ from discord.ext import commands
 
 from strofkabot.config import (
     GEMINI_MAX_CONTEXT_MESSAGES,
+    GUILD_ID,
     MEMORY_INJECTION_ENABLED,
     MEMORY_SERVER_LIMIT,
     MEMORY_USER_LIMIT,
     NICKNAMES_FILE,
+    RAG_ENABLED,
+    RAG_EXTRACTION_MAX_TOKENS,
+    RAG_MAX_QUERY_VARIANTS,
+    RAG_SEARCH_K,
+    RAG_VECTOR_STORE_DIR,
 )
 from strofkabot.discord_db import Database
 from strofkabot.gemini_client import GeminiClient
 from strofkabot.memory_store import Memory, MemoryStore
 from strofkabot.openrouter import OpenRouterClient
+from strofkabot.rag.query_rewriter import (
+    ConversationMessage,
+    MemberInfo,
+    rewrite_query,
+)
 from strofkabot.url_extractor import extract_urls_from_messages, format_url_context
 from strofkabot.utils import (
     build_system_prompt,
@@ -34,6 +45,9 @@ from strofkabot.utils import (
 
 # Maximum number of channel locks to keep in memory
 MAX_CHANNEL_LOCKS = 100
+
+# Cache TTL for member list (1 hour)
+_MEMBER_CACHE_TTL = datetime.timedelta(hours=1)
 
 
 class AICog(commands.Cog):
@@ -52,9 +66,14 @@ class AICog(commands.Cog):
         self.memory_store = memory_store
         self._gemini_client: GeminiClient | None = None
         self._openrouter_client: OpenRouterClient | None = None
+        self._rag_pipeline = None
         # Use OrderedDict for LRU-style eviction of channel locks
         self._channel_locks: OrderedDict[int, asyncio.Lock] = OrderedDict()
         self._nicknames = load_nicknames(NICKNAMES_FILE)
+
+        # Member cache for RAG query rewriting
+        self._member_cache: list[MemberInfo] | None = None
+        self._member_cache_time: datetime.datetime | None = None
 
     def _get_channel_lock(self, channel_id: int) -> asyncio.Lock:
         """Get or create a lock for a specific channel.
@@ -108,6 +127,172 @@ class AICog(commands.Cog):
                 return None
         return self._gemini_client
 
+    @property
+    def rag_pipeline(self):
+        """Lazy initialization of RAG pipeline."""
+        if self._rag_pipeline is None and RAG_ENABLED:
+            try:
+                from strofkabot.rag.embeddings import OpenRouterEmbeddingClient
+                from strofkabot.rag.pipeline import RAGPipeline
+
+                if not RAG_VECTOR_STORE_DIR.exists():
+                    self.logger.warning("RAG vector store not found")
+                    return None
+
+                self._rag_pipeline = RAGPipeline(
+                    vector_store_dir=RAG_VECTOR_STORE_DIR,
+                    embedding_client=OpenRouterEmbeddingClient(),
+                    nicknames=self._nicknames,
+                )
+                self.logger.info("RAG pipeline initialized")
+            except Exception as e:
+                self.logger.warning(f"RAG init failed: {e}")
+                return None
+        return self._rag_pipeline
+
+    async def _get_members(self) -> list[MemberInfo]:
+        """Get cached member list for entity resolution.
+
+        Returns:
+            List of MemberInfo with display names, usernames, and nicknames.
+            Cached for 1 hour to avoid repeated guild queries.
+        """
+        now = datetime.datetime.now(datetime.UTC)
+
+        # Check if cache is valid
+        if (
+            self._member_cache is not None
+            and self._member_cache_time is not None
+            and now - self._member_cache_time < _MEMBER_CACHE_TTL
+        ):
+            return self._member_cache
+
+        # Get guild
+        guild = self.bot.get_guild(GUILD_ID)
+        if not guild:
+            self.logger.warning(f"Guild {GUILD_ID} not found for member cache")
+            return []
+
+        # Build member list
+        members = []
+        for member in guild.members:
+            if member.bot:
+                continue
+
+            custom_nicks = self._nicknames.get(member.id, [])
+            members.append(
+                MemberInfo(
+                    author_id=member.id,
+                    display_name=member.display_name,
+                    username=member.name,
+                    nicknames=custom_nicks,
+                )
+            )
+
+        self._member_cache = members
+        self._member_cache_time = now
+        self.logger.debug(f"Refreshed member cache: {len(members)} members")
+
+        return members
+
+    async def _get_rag_context(
+        self,
+        question: str,
+        context_dicts: list[dict],
+    ) -> str | None:
+        """Retrieve and extract relevant context from server history.
+
+        Uses enhanced query rewriting with member context and conversation history
+        for better entity resolution and pronoun handling.
+
+        Args:
+            question: The user's original question.
+            context_dicts: Conversation context dicts for pronoun resolution.
+
+        Returns:
+            Query-focused extraction string, or None if retrieval failed.
+        """
+        from strofkabot.rag.extraction import extract_relevant_context
+
+        # Get member context for entity resolution
+        members = await self._get_members()
+
+        # Build conversation history from context_dicts
+        conversation_history = []
+        for msg in context_dicts[-5:]:  # Last 5 messages
+            if msg.get("is_bot"):
+                continue
+            conversation_history.append(
+                ConversationMessage(
+                    author=msg.get("author", "Unknown"),
+                    author_id=msg.get("author_id", 0),
+                    content=msg.get("content", ""),
+                )
+            )
+
+        # Call enhanced query rewriter with full context
+        rewritten = await rewrite_query(
+            client=self.openrouter_client._client,
+            question=question,
+            members=members,
+            conversation_history=conversation_history,
+        )
+
+        self.logger.info(
+            f"RAG rewritten: queries={rewritten.rag_queries}, "
+            f"entities={rewritten.detected_entities}, "
+            f"ids={rewritten.resolved_entity_ids}, "
+            f"strategy={rewritten.retrieval_strategy}"
+        )
+
+        # Search all query variants and collect results
+        queries = rewritten.rag_queries[:RAG_MAX_QUERY_VARIANTS]
+        all_results = []
+        for query in queries:
+            results = await self.rag_pipeline.semantic_search(
+                query=query,
+                k=RAG_SEARCH_K,
+                auto_filter_participants=True,
+            )
+            all_results.extend(results)
+
+        if not all_results:
+            return None
+
+        # Deduplicate by chunk_id, keeping highest similarity
+        seen = {}
+        for r in all_results:
+            if r.chunk_id not in seen or r.similarity > seen[r.chunk_id].similarity:
+                seen[r.chunk_id] = r
+        unique_results = list(seen.values())
+
+        # Filter by resolved entity IDs if participant_focused strategy
+        if rewritten.retrieval_strategy == "participant_focused" and rewritten.resolved_entity_ids:
+            filtered = []
+            for r in unique_results:
+                participant_ids = r.metadata.get("participant_ids", [])
+                if any(str(eid) in participant_ids for eid in rewritten.resolved_entity_ids):
+                    filtered.append(r)
+            if filtered:
+                unique_results = filtered
+
+        # Sort by similarity and take top K
+        unique_results = sorted(unique_results, key=lambda x: x.similarity, reverse=True)[
+            :RAG_SEARCH_K
+        ]
+
+        # Use resolved_query for extraction context (pronouns resolved)
+        extraction_question = rewritten.resolved_query or question
+
+        extraction = await extract_relevant_context(
+            client=self.openrouter_client._client,
+            question=extraction_question,
+            search_results=unique_results,
+            max_tokens=RAG_EXTRACTION_MAX_TOKENS,
+        )
+
+        return extraction.text if extraction.success else None
+
     async def _handle_ask(
         self,
         message: discord.Message,
@@ -159,6 +344,24 @@ class AICog(commands.Cog):
                     query_metadata = await self.openrouter_client.classify_query(
                         question, context_dicts
                     )
+
+                # RAG retrieval and extraction (uses enhanced query rewriting)
+                rag_context = None
+                if (
+                    query_metadata
+                    and query_metadata.needs_rag
+                    and self.rag_pipeline is not None
+                    and self.openrouter_client is not None
+                ):
+                    try:
+                        rag_context = await self._get_rag_context(
+                            question=question,
+                            context_dicts=context_dicts,
+                        )
+                        if rag_context:
+                            self.logger.info(f"RAG: {len(rag_context)} chars retrieved")
+                    except Exception as e:
+                        self.logger.warning(f"RAG failed: {e}")
 
                 # Load and filter relevant memories (only if injection is enabled)
                 relevant_user_memories = []
@@ -214,6 +417,7 @@ class AICog(commands.Cog):
                         images=images if images else None,
                         query_metadata=query_metadata,
                         url_context=url_context if url_context else None,
+                        rag_context=rag_context,
                     )
 
                     if response.success:

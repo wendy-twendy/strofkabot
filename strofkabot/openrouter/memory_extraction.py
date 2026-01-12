@@ -206,10 +206,15 @@ Question from {user_name}: {question}{existing_context}
 
                 if func_name == "save_user_memory":
                     # Validate user_id is in known_users (defense in depth)
-                    if args.get("user_id") in known_users.values():
+                    # Note: LLM may return user_id as string, so convert to int
+                    try:
+                        extracted_user_id = int(args.get("user_id", 0))
+                    except (TypeError, ValueError):
+                        extracted_user_id = 0
+                    if extracted_user_id in known_users.values():
                         user_memories.append(
                             {
-                                "user_id": args["user_id"],
+                                "user_id": extracted_user_id,
                                 "memory_text": args.get("memory_text", ""),
                                 "category": args.get("category", "facts"),
                                 "importance": args.get("importance", 5),
@@ -219,10 +224,14 @@ Question from {user_name}: {question}{existing_context}
                         )
 
                 elif func_name == "update_user_memory":
-                    if args.get("user_id") in known_users.values():
+                    try:
+                        extracted_user_id = int(args.get("user_id", 0))
+                    except (TypeError, ValueError):
+                        extracted_user_id = 0
+                    if extracted_user_id in known_users.values():
                         user_updates.append(
                             {
-                                "user_id": args["user_id"],
+                                "user_id": extracted_user_id,
                                 "old_match": args.get("old_memory_match", ""),
                                 "new_memory_text": args.get("new_memory_text", ""),
                                 "category": args.get("category", "facts"),
@@ -231,10 +240,14 @@ Question from {user_name}: {question}{existing_context}
                         )
 
                 elif func_name == "invalidate_user_memory":
-                    if args.get("user_id") in known_users.values():
+                    try:
+                        extracted_user_id = int(args.get("user_id", 0))
+                    except (TypeError, ValueError):
+                        extracted_user_id = 0
+                    if extracted_user_id in known_users.values():
                         user_invalidations.append(
                             {
-                                "user_id": args["user_id"],
+                                "user_id": extracted_user_id,
                                 "text_match": args.get("memory_text_match", ""),
                             }
                         )

@@ -46,6 +46,7 @@ def get_display_name(
     user_id: int,
     fallback: str,
     nicknames: dict[int, list[str]] | None,
+    username: str | None = None,
 ) -> str:
     """Get the display name for a user, preferring nickname if available.
 
@@ -53,15 +54,19 @@ def get_display_name(
         user_id: Discord user ID.
         fallback: Name to use if no nickname is found.
         nicknames: Dict mapping user IDs to nickname lists.
+        username: Optional Discord username to include for disambiguation.
 
     Returns:
-        First nickname if found, otherwise the fallback name.
+        Display name, optionally with username appended if different.
+        Format: "DisplayName (@username)" or just "DisplayName" if same.
     """
     if not nicknames:
-        return fallback
+        display_name = fallback
+    else:
+        nick_list = nicknames.get(user_id)
+        display_name = nick_list[0] if nick_list else fallback
 
-    nick_list = nicknames.get(user_id)
-    if nick_list:
-        return nick_list[0]
+    if username and username != display_name:
+        return f"{display_name} (@{username})"
 
-    return fallback
+    return display_name
